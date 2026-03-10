@@ -18,7 +18,7 @@ class PromptBuilder:
             "Beantworte die Frage ausschließlich anhand des bereitgestellten CONTEXT.",
             "Erfinde keine Informationen und nutze kein externes Wissen.",
             "Wenn die Antwort im CONTEXT nicht enthalten ist, sage das klar und knapp.",
-            "Nenne verwendete Quellen mit [SOURCE <nummer>] passend zur Kontext-Nummerierung.",
+            "Setze Zitationen direkt in die Antwort als [1], [2], ... passend zur Kontext-Nummerierung.",
         ]
 
         parts = [
@@ -32,8 +32,12 @@ class PromptBuilder:
             normalized_context,
             "",
             "OUTPUT FORMAT",
-            "Antwort: <kurze, präzise Antwort auf Basis des CONTEXT>",
-            "Quellen: <z. B. [SOURCE 1], [SOURCE 3] oder 'keine'>",
+            "ANSWER",
+            "<kurze, präzise Antwort auf Basis des CONTEXT mit Zitationen [1], [2], ...>",
+            "",
+            "Sources",
+            "[1] <Quellentitel>",
+            "[2] <Quellentitel>",
         ]
         return "\n".join(parts).strip()
 

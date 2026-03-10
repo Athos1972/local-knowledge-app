@@ -6,6 +6,7 @@ from typing import Any
 from common.logging_setup import AppLogger
 from llm.base import BaseLlmProvider
 from retrieval.answer_pipeline import AnswerPipeline
+from retrieval.citation_formatter import CitationFormatter
 
 logger = AppLogger.get_logger()
 
@@ -16,6 +17,7 @@ class AnswerExecutor:
     def __init__(self, answer_pipeline: AnswerPipeline, llm_provider: BaseLlmProvider):
         self.answer_pipeline = answer_pipeline
         self.llm_provider = llm_provider
+        self.citation_formatter = CitationFormatter()
 
     @classmethod
     def from_data_root(
@@ -51,10 +53,20 @@ class AnswerExecutor:
         if not results:
             logger.info("AnswerExecutor skipped LLM call because no retrieval hits were found.")
             payload["llm_response"] = None
-            payload["answer_text"] = "Keine Treffer gefunden. Daher wurde kein LLM-Aufruf durchgeführt."
+            formatted_answer, citation_map = self.citation_formatter.format_answer(
+                "Keine Treffer gefunden. Daher wurde kein LLM-Aufruf durchgeführt.",
+                payload["sources"],
+            )
+            payload["answer_text"] = formatted_answer
+            payload["citation_map"] = citation_map
             return payload
 
         llm_response = self.llm_provider.generate(prompt)
         payload["llm_response"] = llm_response.to_dict()
-        payload["answer_text"] = llm_response.text
+        formatted_answer, citation_map = self.citation_formatter.format_answer(
+            llm_response.text,
+            payload["sources"],
+        )
+        payload["answer_text"] = formatted_answer
+        payload["citation_map"] = citation_map
         return payload

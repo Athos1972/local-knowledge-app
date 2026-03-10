@@ -60,7 +60,10 @@ class AnswerExecutorTests(unittest.TestCase):
         payload = AnswerExecutor(answer_pipeline=pipeline, llm_provider=provider).answer("event mesh kyma")
 
         self.assertEqual(1, provider.calls)
-        self.assertEqual("Test Answer", payload["answer_text"])
+        self.assertIn("ANSWER", payload["answer_text"])
+        self.assertIn("Test Answer [1]", payload["answer_text"])
+        self.assertIn("Sources", payload["answer_text"])
+        self.assertEqual({"chunk-1": 1}, payload["citation_map"])
         self.assertIsNotNone(payload["llm_response"])
 
     def test_answer_skips_llm_when_no_results(self) -> None:
@@ -76,7 +79,9 @@ class AnswerExecutorTests(unittest.TestCase):
 
         self.assertEqual(0, provider.calls)
         self.assertIsNone(payload["llm_response"])
+        self.assertIn("ANSWER", payload["answer_text"])
         self.assertIn("kein LLM-Aufruf", payload["answer_text"])
+        self.assertEqual({}, payload["citation_map"])
 
 
 if __name__ == "__main__":
