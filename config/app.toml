@@ -5,3 +5,8 @@ level = "INFO"
 log_to_console = true
 log_to_file = true
 separate_file_per_run = true
+
+[confluence_transform]
+input_root = "~/local-knowledge-data/exports/confluence"
+output_root = "~/local-knowledge-data/staging/confluence"
+manifests_dir = "~/local-knowledge-data/system/confluence_transform"

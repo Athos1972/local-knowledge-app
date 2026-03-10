@@ -6,7 +6,8 @@ chunkt Texte und bietet lokale Suche, Ask-/Prompt-Aufbereitung sowie eine **opti
 
 ## Pipeline (aktueller Stand)
 
-Markdown-Ingestion  
+Confluence-Export-Transform (optional)  
+→ Markdown-Ingestion  
 → Frontmatter + Normalisierung  
 → Markdown-aware Chunking  
 → Chunk-Storage + Manifest/Processing-State  
@@ -16,6 +17,16 @@ Markdown-Ingestion
 → Optional: LLM-Ausführung via Ollama
 
 ## Funktionsumfang
+
+### Confluence Transform (neu)
+- Laden exportierter Confluence-Rohdaten aus `~/local-knowledge-data/exports/confluence`
+- Transformation in ingestierbares Markdown mit YAML-Frontmatter
+- MVP-Unterstützung für Makros, Tabellen, Links, Anhänge und Basis-HTML-Strukturen
+- Inkrementeller Lauf mit:
+  - `latest_transform_state.json`
+  - `run_<run_id>.json`
+  - `latest_transform_manifest.json`
+- Standard-Output nach `~/local-knowledge-data/staging/confluence/<space_key>/...`
 
 ### Ingestion
 - Laden von Markdown-Dateien aus dem Filesystem (`~/local-knowledge-data/domains`)
@@ -55,11 +66,11 @@ Markdown-Ingestion
 ## Projektstruktur (grob)
 
 - `common/` – Konfiguration und Logging
-- `sources/` – Source-Modelle und Loader (aktuell Filesystem)
-- `processing/` – Normalisierung, Chunking, State/Manifest, Output
+- `sources/` – Source-Modelle und Loader (Filesystem + Confluence Export)
+- `processing/` – Normalisierung, Chunking, Confluence-Transform, State/Manifest, Output
 - `retrieval/` – Chunk-Laden, Keyword-/Vector-/Hybrid-Suche, Kontext-/Prompt-/Answer-Pipelines
 - `llm/` – Provider-Interface, Response-Modell und Ollama-Provider
-- `scripts/` – ausführbare Skripte für Ingestion, Retrieval und Antwort-CLI
+- `scripts/` – ausführbare Skripte für Transform, Ingestion, Retrieval und Antwort-CLI
 - `config/` – App-Konfiguration (`app.toml`)
 
 
@@ -82,6 +93,9 @@ Damit sind In-Text-Zitationen und Quellenblock eindeutig verknüpft; zusätzlich
 ## Beispielbefehle
 
 ```bash
+python ./scripts/run_transform_confluence.py
+python ./scripts/run_transform_confluence.py --space MYSPACE
+python ./scripts/run_transform_confluence.py --full
 python ./scripts/run_ingestion.py
 python ./scripts/build_vector_index.py
 python ./scripts/search_chunks.py "event mesh"
@@ -96,6 +110,17 @@ Weitere Retrieval-Beispiele:
 python ./scripts/search_chunks.py "event mesh kyma" --mode keyword
 python ./scripts/search_chunks.py "event mesh kyma" --mode vector
 python ./scripts/search_chunks.py "event mesh kyma" --mode hybrid --top-k 10
+```
+
+### Beispielstruktur für Confluence-Export (MVP)
+
+```text
+~/local-knowledge-data/exports/confluence/
+  MYSPACE/
+    123456/
+      page.json
+    789012/
+      content.raw.json
 ```
 
 Hinweis: Ingestion und Suche erwarten das separate Daten-Repo unter
