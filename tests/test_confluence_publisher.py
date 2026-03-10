@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,50 @@ from processing.publish.publisher import ConfluencePublisher
 
 
 class ConfluencePublisherTests(unittest.TestCase):
+    def test_from_sources_prefers_publish_confluence_toml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            (root / "config").mkdir(parents=True, exist_ok=True)
+
+            (root / "config" / "publish_confluence.toml").write_text(
+                """
+[publish.confluence]
+input_root = "~/from_publish_file/staging"
+output_root = "~/from_publish_file/domains"
+
+[publish.confluence.space_map]
+"~NBUBEV" = "from/publish-file"
+""".strip(),
+                encoding="utf-8",
+            )
+            (root / "config" / "app.toml").write_text(
+                """
+[publish.confluence]
+input_root = "~/from_app_file/staging"
+output_root = "~/from_app_file/domains"
+
+[publish.confluence.space_map]
+"~NBUBEV" = "from/app-file"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            previous_cwd = Path.cwd()
+            previous_env = os.environ.get("APP_CONFIG_FILE")
+            try:
+                os.environ["APP_CONFIG_FILE"] = str(root / "config" / "app.toml")
+                os.chdir(root)
+                config = ConfluencePublishConfig.from_sources()
+            finally:
+                os.chdir(previous_cwd)
+                if previous_env is None:
+                    os.environ.pop("APP_CONFIG_FILE", None)
+                else:
+                    os.environ["APP_CONFIG_FILE"] = previous_env
+
+            self.assertEqual("from/publish-file", config.space_map.get("~NBUBEV"))
+            self.assertIn("from_publish_file/domains", str(config.output_root))
+
     def test_resolve_mapped_and_unmapped_space(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)

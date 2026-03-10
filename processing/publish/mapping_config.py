@@ -42,7 +42,12 @@ class ConfluencePublishConfig:
             with path.open("rb") as handle:
                 config_payload = tomllib.load(handle)
         else:
-            config_payload = AppConfig.load()
+            default_mapping_config = Path("config/publish_confluence.toml").resolve()
+            if default_mapping_config.exists():
+                with default_mapping_config.open("rb") as handle:
+                    config_payload = tomllib.load(handle)
+            else:
+                config_payload = AppConfig.load()
 
         section = cls._read_confluence_section(config_payload)
         defaults = section.get("defaults", {}) if isinstance(section.get("defaults"), dict) else {}
