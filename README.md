@@ -54,3 +54,16 @@ python scripts/search_chunks.py "event mesh kyma" --mode hybrid --top-k 10
 
 Hinweis: Ingestion und Suche erwarten das separate Daten-Repo unter
 `~/local-knowledge-data`.
+
+## Ask Pipeline
+
+Die Ask-Pipeline kombiniert Hybrid-Retrieval mit einer Kontext-Konstruktion für LLM-Aufrufe.
+In diesem Schritt wird **kein** LLM-Call ausgeführt; es wird nur ein strukturierter Kontextblock erzeugt.
+
+```bash
+python scripts/search_chunks.py "event mesh"
+python scripts/ask.py "event mesh kyma"
+```
+
+`ask.py` gibt Query, Top-Treffer und den generierten Kontext aus.
+
