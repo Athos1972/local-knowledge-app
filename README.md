@@ -7,6 +7,7 @@ chunkt Texte und bietet lokale Suche, Ask-/Prompt-Aufbereitung sowie eine **opti
 ## Pipeline (aktueller Stand)
 
 Confluence-Export-Transform (optional)  
+→ Publish von `staging/confluence` nach `domains`  
 → Markdown-Ingestion  
 → Frontmatter + Normalisierung  
 → Markdown-aware Chunking  
@@ -35,6 +36,17 @@ Confluence-Export-Transform (optional)
   - `run_<run_id>.json`
   - `latest_transform_manifest.json`
 - Standard-Output nach `~/local-knowledge-data/staging/confluence/<space_key>/...`
+
+
+### Confluence Publish (neu)
+- Liest transformierte Confluence-Markdown-Dateien aus `~/local-knowledge-data/staging/confluence`
+- Mapped `space_key` per TOML-Konfiguration auf Zielpfade unter `~/local-knowledge-data/domains`
+- Schreibt materialisierte Dateien im Modus `copy` inklusive ergänzter Publish-Metadaten
+- Unbekannte Spaces landen standardmäßig unter `_unmapped/confluence/<space_key>`
+- Inkrementeller Lauf mit:
+  - `latest_publish_state.json`
+  - `run_<run_id>.json`
+  - `latest_publish_manifest.json`
 
 ### Ingestion
 - Laden von Markdown-Dateien aus dem Filesystem (`~/local-knowledge-data/domains`)
@@ -103,7 +115,8 @@ Damit sind In-Text-Zitationen und Quellenblock eindeutig verknüpft; zusätzlich
 ```bash
 python ./scripts/run_transform_confluence.py
 python ./scripts/run_transform_confluence.py --space MYSPACE
-python ./scripts/run_transform_confluence.py --full
+python ./scripts/run_transform_confluence.py --space ~NBUBEV --full
+python ./scripts/run_publish_confluence.py --space ~NBUBEV --full
 python ./scripts/run_ingestion.py
 python ./scripts/build_vector_index.py
 python ./scripts/search_chunks.py "event mesh"
@@ -145,3 +158,14 @@ ollama run llama3.1:8b
 
 Standard-Endpunkt ist `http://localhost:11434`.
 Falls Ollama nicht erreichbar ist, liefert das Script eine klare Fehlermeldung mit Exit-Code ungleich 0.
+
+
+Publish-Mapping kann über `config/publish_confluence.toml` (oder `config/app.toml`) gesteuert werden:
+
+```toml
+[publish.confluence.space_map]
+"~NBUBEV" = "sap/customers/xyz/projects/zzz/confluence"
+
+[publish.confluence.defaults]
+fallback_path = "_unmapped/confluence"
+```
