@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import logging
 import re
 
 from processing.confluence.link_transformer import LinkTransformer
@@ -10,6 +11,9 @@ from processing.confluence.macro_transformer import MacroTransformer
 from processing.confluence.models import ConfluenceRawPage, ConfluenceTransformedPage, TransformWarning
 from processing.confluence.table_transformer import TableTransformer
 from sources.document import stable_hash
+
+
+logger = logging.getLogger(__name__)
 
 
 class ConfluenceTransformer:
@@ -27,8 +31,12 @@ class ConfluenceTransformer:
         text, macro_warnings, unsupported = self.macro_transformer.transform(text)
         warnings.extend(macro_warnings)
 
-        text, table_warnings = self.table_transformer.transform(text)
+        text, table_warnings, extracted_properties, key_value_count = self.table_transformer.transform(text)
         warnings.extend(table_warnings)
+        merged_page_properties = self._merge_page_properties(page.page_properties, extracted_properties)
+
+        if key_value_count:
+            logger.info("Seite %s: %s Key-Value-Tabellen erkannt.", page.page_id, key_value_count)
 
         text = self.link_transformer.transform(text, source_url=page.source_url)
         text = self._convert_structure(text)
@@ -55,12 +63,20 @@ class ConfluenceTransformer:
             labels=page.labels,
             parent_title=page.parent_title,
             ancestors=page.ancestors,
-            page_properties=page.page_properties,
+            page_properties=merged_page_properties,
             attachments=page.attachments,
             transform_warnings=warnings,
             unsupported_macros=unsupported,
             content_hash=content_hash,
         )
+
+    def _merge_page_properties(self, existing: dict[str, object], extracted: dict[str, str]) -> dict[str, object]:
+        """Ergänzt erkannte Seiteneigenschaften ohne vorhandene Werte zu überschreiben."""
+        merged: dict[str, object] = dict(existing)
+        for key, value in extracted.items():
+            if key not in merged:
+                merged[key] = value
+        return merged
 
     def _convert_structure(self, text: str) -> str:
         conversions = [

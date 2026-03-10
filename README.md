@@ -22,6 +22,7 @@ Confluence-Export-Transform (optional)
 - Laden exportierter Confluence-Rohdaten aus `~/local-knowledge-data/exports/confluence`
 - Transformation in ingestierbares Markdown mit YAML-Frontmatter
 - MVP-Unterstützung für Makros, Tabellen, Links, Anhänge und Basis-HTML-Strukturen
+- Key-Value-/Page-Properties-Tabellen werden konservativ erkannt, als Bulletliste gerendert und zusätzlich unter `page_properties` im Frontmatter ergänzt
 - Inkrementeller Lauf mit:
   - `latest_transform_state.json`
   - `run_<run_id>.json`
