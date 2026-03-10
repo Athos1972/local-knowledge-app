@@ -24,23 +24,35 @@ class ConfluenceExportLoader:
             logger.warning("Confluence input root existiert nicht: %s", self.input_root)
             return
 
-        for json_path in self._iter_page_json_files():
+        for page_dir, metadata_path in self._iter_page_roots():
             try:
-                payload = json.loads(json_path.read_text(encoding="utf-8"))
-                page = self._build_raw_page(payload, json_path)
+                payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+                page = self._build_raw_page(payload, metadata_path, page_dir)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Seite konnte nicht geladen werden: %s (%s)", json_path, exc)
+                logger.warning("Seite konnte nicht geladen werden: %s (%s)", metadata_path, exc)
                 continue
 
             if space_filter and page.space_key.lower() != space_filter.lower():
                 continue
             yield page
 
-    def _iter_page_json_files(self) -> Iterable[Path]:
-        for file_name in ("page.json", "content.raw.json"):
-            yield from self.input_root.rglob(file_name)
+    def _iter_page_roots(self) -> Iterable[tuple[Path, Path]]:
+        """Liefert Seitenverzeichnisse aus der Exportstruktur.
 
-    def _build_raw_page(self, payload: dict[str, Any], source_file: Path) -> ConfluenceRawPage:
+        Erwartete Struktur:
+        exports/confluence/<instance>/spaces/<space>/by-id/<pageid>/
+          - metadata.json
+          - content.storage.xml
+        """
+        for metadata_path in self.input_root.rglob("metadata.json"):
+            page_dir = metadata_path.parent
+            if page_dir.name == "by-id":
+                continue
+            if page_dir.parent.name != "by-id":
+                continue
+            yield page_dir, metadata_path
+
+    def _build_raw_page(self, payload: dict[str, Any], source_file: Path, page_dir: Path) -> ConfluenceRawPage:
         page_id = str(self._pick(payload, ["page_id", "id", "content_id"], default="")).strip()
         title = str(self._pick(payload, ["title", "page_title", "name"], default="Ohne Titel")).strip()
         space_key = str(self._pick(payload, ["space_key", "space", "spaceKey"], default="unknown")).strip()
@@ -49,7 +61,7 @@ class ConfluenceExportLoader:
             space_obj = self._pick(payload, ["space"], default={})
             space_key = str(space_obj.get("key", space_key)).strip() or space_key
 
-        body = self._extract_body(payload)
+        body = self._extract_body(payload, page_dir)
         source_url = self._optional_str(self._pick(payload, ["source_url", "url", "_links.webui"]))
 
         labels = self._normalize_labels(self._pick(payload, ["labels", "metadata.labels"], default=[]))
@@ -79,7 +91,11 @@ class ConfluenceExportLoader:
             raw_metadata=payload,
         )
 
-    def _extract_body(self, payload: dict[str, Any]) -> str:
+    def _extract_body(self, payload: dict[str, Any], page_dir: Path) -> str:
+        xml_path = page_dir / "content.storage.xml"
+        if xml_path.exists():
+            return xml_path.read_text(encoding="utf-8")
+
         direct_body = self._pick(payload, ["body_storage", "body", "content", "body.value"], default="")
         if isinstance(direct_body, str) and direct_body.strip():
             return direct_body
