@@ -76,6 +76,7 @@ Top-Treffer und generierten Kontext aus. Es wird **kein** LLM aufgerufen.
 
 - strukturierte Quellenliste für Zitierbarkeit/Debugging
 - kompakten Prompt mit klaren QA-Instruktionen
+- klares Ausgabeformat (`Antwort` + `Quellen`) für eine spätere LLM-Anbindung
 - vollständiges Payload für eine spätere LLM-Integration
 
 Auch hier wird **kein** LLM-Call durchgeführt.

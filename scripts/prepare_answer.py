@@ -43,6 +43,7 @@ def _print_result(index: int, result: SearchResult) -> None:
 def main() -> int:
     args = parse_args()
     logger = AppLogger.get_logger()
+    top_k = max(1, args.top_k)
 
     pipeline = AnswerPipeline.from_data_root(
         data_root=args.root,
@@ -51,7 +52,7 @@ def main() -> int:
         max_context_chars=args.max_context_chars,
     )
 
-    payload = pipeline.prepare_answer(args.query, top_k=args.top_k)
+    payload = pipeline.prepare_answer(args.query, top_k=top_k)
 
     query = payload["query"]
     results: list[SearchResult] = payload["results"]

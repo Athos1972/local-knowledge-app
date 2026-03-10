@@ -12,10 +12,19 @@ class SourceFormatter:
         sources: list[dict[str, Any]] = []
 
         for index, result in enumerate(results, start=1):
-            title = self._first_non_empty(result.title, result.doc_id)
+            title = self._first_non_empty(
+                result.title,
+                self._as_non_empty_str(result.metadata.get("title")),
+                result.doc_id,
+            )
             section_header = self._first_non_empty(
                 result.section_header,
                 self._as_non_empty_str(result.metadata.get("section_header")),
+            )
+            source_ref = self._first_non_empty(
+                result.source_ref,
+                self._as_non_empty_str(result.metadata.get("source_ref")),
+                self._as_non_empty_str(result.metadata.get("source")),
             )
 
             source: dict[str, Any] = {
@@ -23,7 +32,7 @@ class SourceFormatter:
                 "doc_id": result.doc_id,
                 "chunk_id": result.chunk_id,
                 "title": title,
-                "source_ref": self._as_non_empty_str(result.source_ref) or None,
+                "source_ref": source_ref or None,
                 "score": round(float(result.score), 4),
             }
             if section_header:

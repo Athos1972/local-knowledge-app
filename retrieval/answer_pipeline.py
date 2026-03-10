@@ -62,9 +62,10 @@ class AnswerPipeline:
 
     def prepare_answer(self, query: str, top_k: int = 5) -> dict[str, Any]:
         normalized_query = query.strip()
-        logger.info("AnswerPipeline query=%s top_k=%s", normalized_query, top_k)
+        normalized_top_k = max(1, int(top_k))
+        logger.info("AnswerPipeline query=%s top_k=%s", normalized_query, normalized_top_k)
 
-        results: list[SearchResult] = self.hybrid_searcher.search(normalized_query, top_k=top_k)
+        results: list[SearchResult] = self.hybrid_searcher.search(normalized_query, top_k=normalized_top_k)
         context = self.context_builder.build_context(results)
         prompt = self.prompt_builder.build_prompt(
             query=normalized_query,

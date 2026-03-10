@@ -30,11 +30,15 @@ class PromptBuilder:
             "",
             "CONTEXT",
             normalized_context,
+            "",
+            "OUTPUT FORMAT",
+            "Antwort: <kurze, präzise Antwort auf Basis des CONTEXT>",
+            "Quellen: <z. B. [SOURCE 1], [SOURCE 3] oder 'keine'>",
         ]
         return "\n".join(parts).strip()
 
     @staticmethod
     def _build_empty_context(results: list[SearchResult]) -> str:
         if results:
-            return "(Kontext konnte nicht aufgebaut werden.)"
-        return "(Kein relevanter Kontext gefunden.)"
+            return "(Kontext konnte nicht aufgebaut werden. Nutze keine externen Informationen.)"
+        return "(Kein relevanter Kontext gefunden. Antworte mit: 'Die Antwort ist im Kontext nicht enthalten.')"
