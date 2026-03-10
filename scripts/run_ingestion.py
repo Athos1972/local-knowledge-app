@@ -1,4 +1,14 @@
 #!/usr/bin/env python3
+"""Ausführbares MVP-Ingestion-Script für lokale Markdown-Quellen.
+
+Ablauf pro Dokument:
+1) Laden über FilesystemLoader
+2) Normalisieren (inkl. Frontmatter)
+3) Schreiben von Dokument + Metadaten
+4) Chunking
+5) Schreiben der Chunks
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,6 +25,7 @@ from sources.filesystem.filesystem_loader import FilesystemLoader
 
 
 def main() -> int:
+    """Führt die vollständige lokale Markdown-Ingestion für `~/local-knowledge-data` aus."""
     logger = AppLogger.get_logger()
 
     data_root = Path.home() / "local-knowledge-data"

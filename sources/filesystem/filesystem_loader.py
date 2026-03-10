@@ -1,3 +1,10 @@
+"""Filesystem-Quelle für die Ingestion-Pipeline.
+
+Dieses Modul scannt rekursiv eine Root-Struktur nach Markdown-Dateien,
+überspringt definierte Dateinamen und liefert jede Datei als `SourceDocument`
+inklusive technischer Dateimetadaten und Source-Referenz.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,13 +17,16 @@ logger = AppLogger.get_logger()
 
 
 class FilesystemLoader:
+    """Lädt Markdown-Dokumente aus einer lokalen Verzeichnisstruktur."""
+
     IGNORE_FILES = {"README.md", "readme.md", "_index.md"}
 
     def __init__(self, root: Path):
+        """Initialisiert den Loader mit einer Root, relativ zu der `source_ref` gebaut wird."""
         self.root = root.expanduser().resolve()
 
     def load(self) -> Iterator[SourceDocument]:
-        """Yield markdown documents from the configured root recursively."""
+        """Liefert rekursiv alle gültigen Markdown-Dateien als `SourceDocument`."""
         logger.info("FilesystemLoader started. Root: %s", self.root)
 
         for file_path in sorted(self.root.rglob("*.md")):
@@ -38,15 +48,9 @@ class FilesystemLoader:
                 source_ref=relative_path,
                 original_uri=file_path.resolve().as_uri(),
             )
+            metadata = self._build_metadata(file_path, relative_path, stat.st_size)
 
-            metadata = {
-                "relative_path": relative_path,
-                "filename": file_path.name,
-                "extension": file_path.suffix.lower(),
-                "size_bytes": stat.st_size,
-            }
-
-            yield SourceDocument(
+            document = SourceDocument(
                 doc_id=build_filesystem_doc_id(self.root, file_path),
                 title=file_path.stem,
                 content=content,
@@ -54,5 +58,17 @@ class FilesystemLoader:
                 source=source,
                 metadata=metadata,
             )
+            logger.debug("Loaded document '%s' as doc_id=%s", relative_path, document.doc_id)
+            yield document
 
         logger.info("FilesystemLoader finished. Root: %s", self.root)
+
+    @staticmethod
+    def _build_metadata(file_path: Path, relative_path: str, size_bytes: int) -> dict[str, str | int]:
+        """Erzeugt standardisierte Dateimetadaten für ein Source-Dokument."""
+        return {
+            "relative_path": relative_path,
+            "filename": file_path.name,
+            "extension": file_path.suffix.lower(),
+            "size_bytes": size_bytes,
+        }

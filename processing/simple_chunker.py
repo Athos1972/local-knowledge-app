@@ -1,10 +1,22 @@
+"""Einfacher, deterministischer Chunking-Schritt für normalisierte Dokumente.
+
+Das Modul zerlegt den Body eines Dokuments zeichenbasiert in überlappende
+Chunks und gibt eine Liste von `ChunkDocument`-Objekten zurück.
+"""
+
 from __future__ import annotations
 
+from common.logging_setup import AppLogger
 from sources.document import ChunkDocument, NormalizedDocument, stable_hash
+
+logger = AppLogger.get_logger()
 
 
 class SimpleChunker:
+    """Erzeugt überlappende Text-Chunks für ein normalisiertes Dokument."""
+
     def __init__(self, chunk_size: int = 1200, overlap: int = 150):
+        """Initialisiert Chunk-Größe und Overlap mit einfacher Validierung."""
         if chunk_size <= 0:
             raise ValueError("chunk_size must be > 0")
         if overlap < 0:
@@ -16,8 +28,10 @@ class SimpleChunker:
         self.overlap = overlap
 
     def chunk_document(self, doc: NormalizedDocument) -> list[ChunkDocument]:
+        """Zerlegt ein Dokument in nicht-leere Chunks und annotiert Chunk-Metadaten."""
         text = doc.body.strip()
         if not text:
+            logger.debug("Skipping chunking for empty body. doc_id=%s", doc.doc_id)
             return []
 
         chunks: list[ChunkDocument] = []
@@ -47,4 +61,5 @@ class SimpleChunker:
             if start + self.chunk_size >= len(text):
                 break
 
+        logger.debug("Chunked doc_id=%s into %s chunks", doc.doc_id, len(chunks))
         return chunks

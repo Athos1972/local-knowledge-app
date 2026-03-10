@@ -1,13 +1,26 @@
+"""Normalisierungsschritt für Markdown-Quellen.
+
+Dieses Modul transformiert ein `SourceDocument` in ein fachlich angereichertes
+`NormalizedDocument`, entfernt Frontmatter aus dem Body und führt Metadaten
+konsistent zusammen.
+"""
+
 from __future__ import annotations
 
 from typing import Any
 
+from common.logging_setup import AppLogger
 from processing.frontmatter_parser import FrontmatterParser
 from sources.document import NormalizedDocument, SourceDocument, stable_hash
 
+logger = AppLogger.get_logger()
+
 
 class MarkdownNormalizer:
+    """Normalisiert Markdown-Quelldokumente für nachgelagerte Verarbeitungsschritte."""
+
     def normalize(self, source_doc: SourceDocument) -> NormalizedDocument:
+        """Erzeugt aus einem `SourceDocument` ein konsistentes `NormalizedDocument`."""
         parsed = FrontmatterParser.parse(source_doc.content)
         frontmatter = parsed.metadata
 
@@ -30,10 +43,19 @@ class MarkdownNormalizer:
             metadata=metadata,
         )
         normalized.checksum = stable_hash(normalized.body)
+
+        logger.debug(
+            "Normalized doc_id=%s title=%s tags=%s metadata_keys=%s",
+            normalized.doc_id,
+            normalized.title,
+            len(normalized.tags),
+            len(normalized.metadata),
+        )
         return normalized
 
     @staticmethod
     def _pick_title(frontmatter_title: Any, source_doc: SourceDocument) -> str:
+        """Ermittelt den Dokumenttitel über definierte Fallback-Reihenfolge."""
         if isinstance(frontmatter_title, str) and frontmatter_title.strip():
             return frontmatter_title.strip()
         if source_doc.title.strip():
@@ -42,12 +64,14 @@ class MarkdownNormalizer:
 
     @staticmethod
     def _merge_metadata(base: dict[str, Any], frontmatter: dict[str, Any]) -> dict[str, Any]:
+        """Führt Source-Metadaten und Frontmatter-Metadaten zusammen."""
         merged = dict(base)
         merged.update(frontmatter)
         return merged
 
     @staticmethod
     def _optional_str(value: Any) -> str | None:
+        """Normalisiert optionale String-Felder auf `str | None`."""
         if isinstance(value, str) and value.strip():
             return value.strip()
         return None
