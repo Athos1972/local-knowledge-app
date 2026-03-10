@@ -34,6 +34,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Local knowledge ingestion")
     parser.add_argument(
         "--full-refresh",
+        "--full",
+        dest="full_refresh",
         action="store_true",
         help="Erzwingt komplette Neuverarbeitung aller Dokumente.",
     )
