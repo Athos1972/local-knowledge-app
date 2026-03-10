@@ -22,6 +22,13 @@ Confluence-Export-Transform (optional)
 - Laden exportierter Confluence-Rohdaten aus `~/local-knowledge-data/exports/confluence`
 - Transformation in ingestierbares Markdown mit YAML-Frontmatter
 - MVP-Unterstützung für Makros, Tabellen, Links, Anhänge und Basis-HTML-Strukturen
+- Makro-Verhalten (konservativ):
+  - `details`/`expand` werden als Abschnitt mit Überschrift gerendert
+  - `toc` wird bewusst ignoriert (kein sichtbarer Marker im Markdown)
+  - `plantuml`/`plantumlrender` bleiben nach Möglichkeit als `plantuml`-Codeblock erhalten
+  - `table-filter` wird als Container behandelt, innerer Inhalt wird normal verarbeitet
+  - `jira` und `view-file` haben Basissupport als lesbarer Hinweis/Link
+  - Makronamen-Parsing ist robuster und normalisiert ungültige Namen auf `unknown_macro`
 - Key-Value-/Page-Properties-Tabellen werden konservativ erkannt, als Bulletliste gerendert und zusätzlich unter `page_properties` im Frontmatter ergänzt
 - Inkrementeller Lauf mit:
   - `latest_transform_state.json`
