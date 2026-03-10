@@ -24,7 +24,7 @@ from processing.file_writer import FileWriter
 from processing.manifest import ProcessedDocumentRecord, RunManifest, generate_run_id
 from processing.markdown_normalizer import MarkdownNormalizer
 from processing.processing_state import ProcessingState
-from processing.simple_chunker import SimpleChunker
+from processing.markdown_chunker import MarkdownChunker
 from sources.document import stable_hash, utc_now_iso
 from sources.filesystem.filesystem_loader import FilesystemLoader
 
@@ -61,7 +61,7 @@ def main() -> int:
 
     loader = FilesystemLoader(domains_root)
     normalizer = MarkdownNormalizer()
-    chunker = SimpleChunker()
+    chunker = MarkdownChunker()
     writer = FileWriter(data_root)
     state = ProcessingState.load(state_path)
 
