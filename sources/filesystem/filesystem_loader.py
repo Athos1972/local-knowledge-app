@@ -1,5 +1,5 @@
 from pathlib import Path
-from sources.document import Document
+from sources.document import SourceDocument
 from common.logging_setup import AppLogger
 from processing.frontmatter_parser import FrontmatterParser
 
@@ -58,7 +58,7 @@ class FilesystemLoader:
 
             metadata = {**path_metadata, **frontmatter_metadata}
 
-            document = Document(
+            document = SourceDocument(
                 id=str(file),
                 title=metadata.pop("title", file.stem),
                 text=cleaned_text,
