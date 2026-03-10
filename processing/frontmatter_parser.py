@@ -1,36 +1,77 @@
-# processing/frontmatter_parser.py
+from __future__ import annotations
 
-import yaml
-import re
+from dataclasses import dataclass, field
+from typing import Any
+
+try:
+    import yaml
+except ModuleNotFoundError:  # pragma: no cover
+    yaml = None
+
+
+@dataclass(slots=True)
+class ParsedFrontmatter:
+    metadata: dict[str, Any] = field(default_factory=dict)
+    body: str = ""
 
 
 class FrontmatterParser:
-    FRONTMATTER_PATTERN = re.compile(
-        r"^---\s*\n(.*?)\n---\s*\n(.*)$",
-        re.DOTALL
-    )
+    """Small parser for markdown frontmatter delimited by --- lines."""
 
     @classmethod
-    def parse(cls, text: str):
-        """
-        Extrahiert YAML-Frontmatter aus Markdown.
+    def parse(cls, text: str) -> ParsedFrontmatter:
+        if not text.startswith("---"):
+            return ParsedFrontmatter(metadata={}, body=text)
 
-        Returns:
-            metadata (dict)
-            cleaned_text (str)
-        """
+        lines = text.splitlines()
+        if not lines or lines[0].strip() != "---":
+            return ParsedFrontmatter(metadata={}, body=text)
 
-        match = cls.FRONTMATTER_PATTERN.match(text)
+        end_index = None
+        for index in range(1, len(lines)):
+            if lines[index].strip() == "---":
+                end_index = index
+                break
 
-        if not match:
-            return {}, text
+        if end_index is None:
+            return ParsedFrontmatter(metadata={}, body=text)
 
-        yaml_block = match.group(1)
-        body = match.group(2)
+        metadata_block = "\n".join(lines[1:end_index])
+        body = "\n".join(lines[end_index + 1 :])
 
-        try:
-            metadata = yaml.safe_load(yaml_block) or {}
-        except Exception:
-            metadata = {}
+        metadata = cls._parse_metadata(metadata_block)
+        metadata["tags"] = cls._normalize_tags(metadata.get("tags"))
 
-        return metadata, body
+        return ParsedFrontmatter(metadata=metadata, body=body)
+
+    @staticmethod
+    def _parse_metadata(block: str) -> dict[str, Any]:
+        if not block.strip():
+            return {}
+
+        if yaml is not None:
+            try:
+                parsed = yaml.safe_load(block)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, dict):
+                return parsed
+
+        metadata: dict[str, Any] = {}
+        for raw_line in block.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            metadata[key.strip()] = value.strip().strip("\"'")
+        return metadata
+
+    @staticmethod
+    def _normalize_tags(value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        return []
