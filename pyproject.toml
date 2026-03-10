@@ -7,6 +7,9 @@ name = "local-knowledge-app"
 version = "0.1.0"
 description = "Local knowledge system"
 requires-python = ">=3.11"
+dependencies = [
+    "sentence-transformers>=3.0.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
