@@ -40,11 +40,16 @@ Markdown-Ingestion
   - Kontext
   - strukturierter Prompt
   - Quellenobjekte (`source_number`, `doc_id`, `chunk_id`, `title`, `source_ref`, `score`, optional `section_header`)
+  - `citation_map` für Mapping `chunk_id -> citation index`
 
 ### Optionale LLM-Ausführung
 - Schlanke LLM-Provider-Schicht (`llm/`)
 - Aktuell implementierter Provider: **Ollama** (`/api/generate`, non-streaming)
 - `AnswerExecutor` kombiniert bestehende `AnswerPipeline` mit einem LLM-Provider
+- Antwortausgabe wird strukturiert formatiert via `CitationFormatter`:
+  - Header `ANSWER`
+  - Fließtext mit Inline-Zitationen `[1]`, `[2]`, ...
+  - `Sources`-Block mit zugehörigen Quellentiteln
 - Keine UI, keine Agenten, kein schweres Orchestrierungs-Framework
 
 ## Projektstruktur (grob)
@@ -56,6 +61,23 @@ Markdown-Ingestion
 - `llm/` – Provider-Interface, Response-Modell und Ollama-Provider
 - `scripts/` – ausführbare Skripte für Ingestion, Retrieval und Antwort-CLI
 - `config/` – App-Konfiguration (`app.toml`)
+
+
+## Antwortformat
+
+Die finale Ausgabe von `scripts/answer.py` folgt einem konsistenten Zitationsschema:
+
+```text
+ANSWER
+
+<Event Mesh explanation text mit [1], [2], ...>
+
+Sources
+[1] Event Mesh Architektur – Kyma Services
+[2] Event Mesh Architektur – Event Topics
+```
+
+Damit sind In-Text-Zitationen und Quellenblock eindeutig verknüpft; zusätzlich steht im Payload ein `citation_map` (`chunk_id -> citation index`) für Weiterverarbeitung zur Verfügung.
 
 ## Beispielbefehle
 
