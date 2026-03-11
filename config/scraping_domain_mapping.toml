@@ -1,0 +1,17 @@
+[mapping]
+default_target_subpath = "external/unassigned"
+
+[[mapping.rules]]
+id = "wstw-prefix"
+path_prefix = "wstw/"
+target_subpath = "external/wstw"
+
+[[mapping.rules]]
+id = "energy-prefix"
+path_prefix = "energy/"
+target_subpath = "external/energy"
+
+[[mapping.rules]]
+id = "host-fragment-example"
+path_contains = "docs.example.com"
+target_subpath = "external/docs-example-com"

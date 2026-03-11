@@ -156,3 +156,56 @@ python scripts/import_scrape2md_export.py \
 ```
 
 Das Tool übernimmt bewusst **kein Crawling** und **keine HTML→Markdown-Konvertierung**. Es importiert Markdown-Dateien aus `pages/`, nutzt Metadaten aus `manifest.json`, setzt/aktualisiert optional Frontmatter und schreibt die Dateien in die konfigurierte Zielstruktur.
+
+## Scraping-Asset Transformationspipeline (neu)
+
+Für bereits gescrapte Dateien unter `exports/scraping/...` gibt es nun einen getrennten, manifestgetriebenen Zwei-Stufen-Flow:
+
+1. **Transformation**: `exports/scraping/...` → `staging/transformed/scraping/...`
+2. **Domain-Mapping**: `staging/transformed/...` → `domains/...`
+
+Damit bleiben technische Konvertierung und fachliche Zuordnung strikt entkoppelt.
+
+### 1) Transformation aus `exports/scraping`
+
+```bash
+python scripts/run_transform_scraping_exports.py \
+  --input-root exports/scraping \
+  --output-root staging/transformed \
+  --changed-only
+```
+
+Optionen:
+- `--dry-run`: nur planen, nichts schreiben
+- `--limit N`: max. Anzahl verarbeiteter unterstützter Dateien
+- `--force`: Artefakte auch bei bestehendem Stand neu schreiben
+- `--changed-only`: nur transformieren, wenn Quelle neuer als Zielartefakte ist
+
+Unterstützte MVP-Formate (MarkItDown-Adapter):
+- `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.xls`
+- `.html`, `.htm`, `.csv`, `.json`, `.xml`, `.epub`
+
+Bewusste MVP-Grenzen:
+- keine ZIP-Rekursion
+- kein OCR/Bildpfad
+- keine Audio-/YouTube-/LLM-Konvertierung
+
+Pro Quelldatei entstehen:
+- `<name>.md`
+- `<name>.meta.json`
+
+Zusätzlich wird ein Run-Manifest geschrieben (`manifest_*.json`, `manifest.latest.json`).
+
+### 2) Mapping nach `domains/...`
+
+```bash
+python scripts/run_map_transformed_to_domains.py \
+  --transformed-root staging/transformed \
+  --domains-root domains \
+  --config config/scraping_domain_mapping.toml
+```
+
+Regeln sind in TOML konfigurierbar (Pfadpräfix, Teilstring, Dateiname, Fallback).
+Die Mapping-Stufe ergänzt Domain-Metadaten, behält aber technische Transform-Metadaten bei.
+
+Beispielkonfiguration: `config/scraping_domain_mapping.toml`.

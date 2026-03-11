@@ -12,6 +12,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+markitdown = [
+    "markitdown>=0.0.1",
+]
+
 legacy-hf = [
     "sentence-transformers>=3.0.0",
     "transformers>=4.0.0",
@@ -23,5 +27,5 @@ legacy-hf = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["common*", "processing*", "sources*", "retrieval*"]
+include = ["common*", "processing*", "sources*", "retrieval*", "local_knowledge_app*"]
 exclude = ["scripts*", "config*"]
