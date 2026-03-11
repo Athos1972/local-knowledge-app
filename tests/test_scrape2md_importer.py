@@ -60,6 +60,8 @@ class Scrape2mdImporterTests(unittest.TestCase):
             written = target_file.read_text(encoding="utf-8")
             self.assertIn('title: Getting Started', written)
             self.assertIn('source_key: docs-example-com', written)
+            self.assertIn('source_system: website', written)
+            self.assertIn('source_meta:', written)
             self.assertIn('source_domain: docs.example.com', written)
             self.assertIn('status: raw', written)
 

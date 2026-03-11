@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Any
 
 import tomllib
-import yaml
+
+from processing.frontmatter_schema import (
+    build_frontmatter,
+    merge_frontmatter,
+    parse_frontmatter,
+    render_frontmatter,
+)
 
 
 LOGGER = logging.getLogger("scrape2md_importer")
@@ -210,9 +216,9 @@ def _process_markdown_file(
     final_text = original_text
 
     if config.frontmatter.enabled:
-        parsed_frontmatter, body = _parse_frontmatter(original_text)
+        existing_frontmatter, body = parse_frontmatter(original_text)
         merged_frontmatter = _merge_frontmatter(
-            existing=parsed_frontmatter,
+            existing=existing_frontmatter,
             body=body,
             page_metadata=page_metadata,
             manifest=manifest,
@@ -220,7 +226,7 @@ def _process_markdown_file(
             source_file=source_file,
             imported_at=imported_at,
         )
-        final_text = _render_markdown_with_frontmatter(merged_frontmatter, body)
+        final_text = render_frontmatter(merged_frontmatter, body)
 
     if config.behavior.dry_run:
         LOGGER.info("[dry-run] Would write %s", target_file)
@@ -241,34 +247,28 @@ def _merge_frontmatter(
     source_file: Path,
     imported_at: str,
 ) -> dict[str, Any]:
-    merged = dict(existing)
-
     source_domain = str(manifest.get("domain") or manifest.get("source_domain") or config.source.export_root.name)
     source_url = _pick_first_str(page_metadata, "source_url", "url", "canonical_url")
     crawl_timestamp = _pick_first_str(manifest, "crawl_timestamp", "exported_at", "created_at")
     title = _determine_title(existing, page_metadata, body, source_file, config)
 
-    merged.update(
-        {
-            "title": title,
-            "source_type": "external_website",
-            "source_key": config.source.source_key,
+    updates = build_frontmatter(
+        title=title,
+        source_type="external_website",
+        source_system="website",
+        source_key=config.source.source_key,
+        source_url=source_url or "",
+        original_id=_pick_first_str(page_metadata, "id", "page_id", "doc_id", "url") or "",
+        original_path=str(source_file),
+        imported_at=imported_at,
+        status=str(existing.get("status") or "raw"),
+        source_meta={
             "source_domain": source_domain,
-            "source_url": source_url or "",
-            "original_url": source_url or "",
             "crawl_timestamp": crawl_timestamp or "",
-            "imported_at": imported_at,
             "content_type": _pick_first_str(page_metadata, "content_type", "type") or "markdown",
-            "status": str(existing.get("status") or "raw"),
-        }
+        },
     )
-
-    if "local_asset_refs" not in merged:
-        merged["local_asset_refs"] = []
-    if "tags" not in merged:
-        merged["tags"] = []
-
-    return merged
+    return merge_frontmatter(existing, updates)
 
 
 def _pick_first_str(values: dict[str, Any], *keys: str) -> str | None:
@@ -308,38 +308,6 @@ def _extract_first_heading(markdown_body: str) -> str | None:
     if not match:
         return None
     return match.group(1).strip()
-
-
-def _parse_frontmatter(markdown_text: str) -> tuple[dict[str, Any], str]:
-    if not markdown_text.startswith("---\n"):
-        return {}, markdown_text
-
-    lines = markdown_text.splitlines()
-    if not lines or lines[0].strip() != "---":
-        return {}, markdown_text
-
-    end_index = None
-    for index in range(1, len(lines)):
-        if lines[index].strip() == "---":
-            end_index = index
-            break
-
-    if end_index is None:
-        return {}, markdown_text
-
-    raw_frontmatter = "\n".join(lines[1:end_index])
-    body = "\n".join(lines[end_index + 1 :])
-
-    parsed = yaml.safe_load(raw_frontmatter) or {}
-    if not isinstance(parsed, dict):
-        parsed = {}
-    return parsed, body
-
-
-def _render_markdown_with_frontmatter(frontmatter: dict[str, Any], body: str) -> str:
-    serialized = yaml.safe_dump(frontmatter, sort_keys=False, allow_unicode=True).strip()
-    normalized_body = body.lstrip("\n")
-    return f"---\n{serialized}\n---\n\n{normalized_body}\n"
 
 
 def _utc_timestamp() -> str:

@@ -129,6 +129,13 @@ Optionales Extra installieren:
 pip install .[legacy-hf]
 ```
 
+
+## Einheitliches Frontmatter-Schema
+
+Für quellenübergreifende Markdown-Metadaten (Website, Confluence, JIRA, Filesystem, ...) gibt es ein einheitliches Schema und zentrale Utilities in `processing/frontmatter_schema.py`.
+
+Details und Beispiele: `docs/frontmatter_schema.md`.
+
 ## scrape2md-Export Import (Transfer-Stufe)
 
 Für die nachgelagerte Überführung von `scrape2md`-Exporten in die lokale Domainstruktur gibt es ein separates Script:
