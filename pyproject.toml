@@ -8,7 +8,17 @@ version = "0.1.0"
 description = "Local knowledge system"
 requires-python = ">=3.11"
 dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+legacy-hf = [
     "sentence-transformers>=3.0.0",
+    "transformers>=4.0.0",
+    "huggingface-hub>=0.0.0",
+    "tokenizers>=0.0.0",
+    "safetensors>=0.0.0",
+    "torch>=2.0.0",
 ]
 
 [tool.setuptools.packages.find]

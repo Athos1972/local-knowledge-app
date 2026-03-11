@@ -6,9 +6,12 @@ from typing import Any
 from common.logging_setup import AppLogger
 from retrieval.chunk_repository import ChunkRepository
 from retrieval.context_builder import ContextBuilder
+from retrieval.embedding_provider import EmbeddingProvider
+from retrieval.embedding_provider import build_embedding_provider
 from retrieval.hybrid_search import HybridSearcher
 from retrieval.keyword_search import KeywordSearcher, SearchResult
 from retrieval.vector_search import VectorSearcher
+from retrieval.runtime_settings import RuntimeSettings
 
 logger = AppLogger.get_logger()
 
@@ -31,14 +34,22 @@ class AskPipeline:
         keyword_weight: float = 0.5,
         vector_weight: float = 0.5,
         max_context_chars: int = 8000,
+        embedding_provider: EmbeddingProvider | None = None,
     ) -> "AskPipeline":
         root = (data_root or (Path.home() / "local-knowledge-data")).expanduser().resolve()
+        settings = RuntimeSettings.load()
+        active_embedding_provider = embedding_provider or build_embedding_provider(
+            provider_name=settings.embedding_provider,
+            model_name=settings.ollama_embed_model,
+            ollama_base_url=settings.ollama_base_url,
+        )
 
         repository = ChunkRepository(data_root=root)
         chunks = repository.load_chunks()
 
         keyword_searcher = KeywordSearcher(chunks)
         vector_searcher = VectorSearcher(
+            embedding_provider=active_embedding_provider,
             db_path=root / "index" / "vector_index.sqlite",
             chunks=chunks,
         )

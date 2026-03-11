@@ -13,12 +13,16 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from common.logging_setup import AppLogger
 from retrieval.chunk_repository import ChunkRepository
+from retrieval.embedding_provider import EmbeddingProviderError
+from retrieval.embedding_provider import build_embedding_provider
 from retrieval.hybrid_search import HybridSearcher
 from retrieval.keyword_search import KeywordSearcher
+from retrieval.runtime_settings import RuntimeSettings
 from retrieval.vector_search import VectorSearcher
 
 
 def parse_args() -> argparse.Namespace:
+    settings = RuntimeSettings.load()
     parser = argparse.ArgumentParser(description="Search over local chunk JSONL files")
     parser.add_argument("query", help="Suchanfrage, z. B. 'event mesh kyma'")
     parser.add_argument("--top-k", type=int, default=5, help="Anzahl Treffer (Standard: 5)")
@@ -36,6 +40,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--keyword-weight", type=float, default=0.5, help="Gewichtung Keyword in hybrid")
     parser.add_argument("--vector-weight", type=float, default=0.5, help="Gewichtung Vector in hybrid")
+    parser.add_argument("--embedding-provider", choices=["ollama", "sentence_transformers"], default=settings.embedding_provider)
+    parser.add_argument("--embedding-model", default=settings.ollama_embed_model)
+    parser.add_argument("--ollama-url", default=settings.ollama_base_url)
     return parser.parse_args()
 
 
@@ -59,7 +66,18 @@ def main() -> int:
         return 1
 
     keyword_searcher = KeywordSearcher(chunks)
+    try:
+        embedding_provider = build_embedding_provider(
+            provider_name=args.embedding_provider,
+            model_name=args.embedding_model,
+            ollama_base_url=args.ollama_url,
+        )
+    except EmbeddingProviderError as error:
+        print(f"Fehler beim Embedding-Setup: {error}")
+        return 2
+
     vector_searcher = VectorSearcher(
+        embedding_provider=embedding_provider,
         db_path=args.root.expanduser().resolve() / "index" / "vector_index.sqlite",
         chunks=chunks,
     )

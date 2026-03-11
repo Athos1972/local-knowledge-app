@@ -23,3 +23,11 @@ mode = "copy"
 [publish.confluence.defaults]
 fallback_path = "_unmapped/confluence"
 publish_unmapped = true
+
+[ollama]
+base_url = "http://localhost:11434"
+chat_model = "llama3.1:8b"
+embed_model = "nomic-embed-text"
+
+[embeddings]
+provider = "ollama"

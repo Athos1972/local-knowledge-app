@@ -2,170 +2,129 @@
 
 `local-knowledge-app` ist der Ingestion-, Retrieval- und Antwortvorbereitungs-Teil eines lokalen Knowledge-Setups.
 Die App lädt Markdown-Dateien aus einem separaten Daten-Repo, normalisiert Inhalte,
-chunkt Texte und bietet lokale Suche, Ask-/Prompt-Aufbereitung sowie eine **optionale** LLM-Ausführung (Ollama).
+chunkt Texte und bietet lokale Suche, Ask-/Prompt-Aufbereitung sowie eine **optionale** LLM-Ausführung.
 
-## Pipeline (aktueller Stand)
+## Offline-first Zielbild (neu)
 
-Confluence-Export-Transform (optional)  
-→ Publish von `staging/confluence` nach `domains`  
-→ Markdown-Ingestion  
-→ Frontmatter + Normalisierung  
-→ Markdown-aware Chunking  
-→ Chunk-Storage + Manifest/Processing-State  
-→ Keyword Retrieval / Vector Retrieval / Hybrid Retrieval  
-→ Ask-Pipeline (Kontextaufbau)  
-→ Prompt-/Answer-Vorbereitung  
-→ Optional: LLM-Ausführung via Ollama
+Die Runtime ist jetzt standardmäßig vollständig lokal über **Ollama**:
 
-## Funktionsumfang
+- Antworten über Ollama (`/api/generate`) auf `http://localhost:11434`
+- Embeddings ebenfalls über Ollama (`/api/embed`)
+- Standardmodelle:
+  - LLM: `llama3.1:8b`
+  - Embeddings: `nomic-embed-text`
+- Legacy-Hugging-Face/sentence-transformers ist nur noch optional (explizit aktivierbar)
 
-### Confluence Transform (neu)
-- Laden exportierter Confluence-Rohdaten aus `~/local-knowledge-data/exports/confluence`
-- Transformation in ingestierbares Markdown mit YAML-Frontmatter
-- MVP-Unterstützung für Makros, Tabellen, Links, Anhänge und Basis-HTML-Strukturen
-- Makro-Verhalten (konservativ):
-  - `details`/`expand` werden als Abschnitt mit Überschrift gerendert
-  - `toc` wird bewusst ignoriert (kein sichtbarer Marker im Markdown)
-  - `plantuml`/`plantumlrender` bleiben nach Möglichkeit als `plantuml`-Codeblock erhalten
-  - `table-filter` wird als Container behandelt, innerer Inhalt wird normal verarbeitet
-  - `jira` und `view-file` haben Basissupport als lesbarer Hinweis/Link
-  - Makronamen-Parsing ist robuster und normalisiert ungültige Namen auf `unknown_macro`
-- Key-Value-/Page-Properties-Tabellen werden konservativ erkannt, als Bulletliste gerendert und zusätzlich unter `page_properties` im Frontmatter ergänzt
-- Inkrementeller Lauf mit:
-  - `latest_transform_state.json`
-  - `run_<run_id>.json`
-  - `latest_transform_manifest.json`
-- Standard-Output nach `~/local-knowledge-data/staging/confluence/<space_key>/...`
+> **Migration-Hinweis:** Bestehende Vektorindizes müssen nach der Umstellung neu gebaut werden,
+> da Embeddings verschiedener Modelle/Provider nicht kompatibel sind.
 
+## Konfiguration
 
-### Confluence Publish (neu)
-- Liest transformierte Confluence-Markdown-Dateien aus `~/local-knowledge-data/staging/confluence`
-- Mapped `space_key` per TOML-Konfiguration auf Zielpfade unter `~/local-knowledge-data/domains`
-- Schreibt materialisierte Dateien im Modus `copy` inklusive ergänzter Publish-Metadaten
-- Unbekannte Spaces landen standardmäßig unter `_unmapped/confluence/<space_key>`
-- Inkrementeller Lauf mit:
-  - `latest_publish_state.json`
-  - `run_<run_id>.json`
-  - `latest_publish_manifest.json`
+Konfiguration wird aus `config/app.toml` gelesen, ENV-Variablen überschreiben TOML-Werte.
 
-### Ingestion
-- Laden von Markdown-Dateien aus dem Filesystem (`~/local-knowledge-data/domains`)
-- Frontmatter-Parsing und Normalisierung in ein einheitliches Dokumentmodell
-- Markdown-aware Chunking entlang von Überschriften (inkl. robustem Fallback)
-- Schreiben von:
-  - normalisierten Dokumenten
-  - Metadaten
-  - Chunk-JSONL
-  - Run-Manifest und Processing-State für inkrementelle Läufe
+### Relevante ENV-Variablen
 
-### Retrieval
-- Lokale Keyword-Suche über `processed/chunks/*.jsonl`
-- Lokale Vector-Suche über SQLite-Index (`index/vector_index.sqlite`)
-- Hybrid-Suche mit kombinierter Keyword- und Vector-Bewertung
+- `OLLAMA_BASE_URL` (Default: `http://localhost:11434`)
+- `OLLAMA_CHAT_MODEL` (Default: `llama3.1:8b`)
+- `OLLAMA_EMBED_MODEL` (Default: `nomic-embed-text`)
+- `EMBEDDING_PROVIDER` (`ollama` oder `sentence_transformers`, Default: `ollama`)
 
-### Ask / Prompt / Answer Preparation
-- Ask-Pipeline zum Erzeugen eines strukturierten Kontextblocks
-- Answer-Pipeline zur Erstellung eines QA-Payloads:
-  - Query
-  - Trefferliste
-  - Kontext
-  - strukturierter Prompt
-  - Quellenobjekte (`source_number`, `doc_id`, `chunk_id`, `title`, `source_ref`, `score`, optional `section_header`)
-  - `citation_map` für Mapping `chunk_id -> citation index`
+### app.toml Defaults
 
-### Optionale LLM-Ausführung
-- Schlanke LLM-Provider-Schicht (`llm/`)
-- Aktuell implementierter Provider: **Ollama** (`/api/generate`, non-streaming)
-- `AnswerExecutor` kombiniert bestehende `AnswerPipeline` mit einem LLM-Provider
-- Antwortausgabe wird strukturiert formatiert via `CitationFormatter`:
-  - Header `ANSWER`
-  - Fließtext mit Inline-Zitationen `[1]`, `[2]`, ...
-  - `Sources`-Block mit zugehörigen Quellentiteln
-- Keine UI, keine Agenten, kein schweres Orchestrierungs-Framework
+```toml
+[ollama]
+base_url = "http://localhost:11434"
+chat_model = "llama3.1:8b"
+embed_model = "nomic-embed-text"
 
-## Projektstruktur (grob)
-
-- `common/` – Konfiguration und Logging
-- `sources/` – Source-Modelle und Loader (Filesystem + Confluence Export)
-- `processing/` – Normalisierung, Chunking, Confluence-Transform, State/Manifest, Output
-- `retrieval/` – Chunk-Laden, Keyword-/Vector-/Hybrid-Suche, Kontext-/Prompt-/Answer-Pipelines
-- `llm/` – Provider-Interface, Response-Modell und Ollama-Provider
-- `scripts/` – ausführbare Skripte für Transform, Ingestion, Retrieval und Antwort-CLI
-- `config/` – App-Konfiguration (`app.toml`)
-
-
-## Antwortformat
-
-Die finale Ausgabe von `scripts/answer.py` folgt einem konsistenten Zitationsschema:
-
-```text
-ANSWER
-
-<Event Mesh explanation text mit [1], [2], ...>
-
-Sources
-[1] Event Mesh Architektur – Kyma Services
-[2] Event Mesh Architektur – Event Topics
+[embeddings]
+provider = "ollama"
 ```
 
-Damit sind In-Text-Zitationen und Quellenblock eindeutig verknüpft; zusätzlich steht im Payload ein `citation_map` (`chunk_id -> citation index`) für Weiterverarbeitung zur Verfügung.
+## Lokales Setup mit Ollama
 
-## Beispielbefehle
-
-```bash
-python ./scripts/run_transform_confluence.py
-python ./scripts/run_transform_confluence.py --space MYSPACE
-python ./scripts/run_transform_confluence.py --space ~NBUBEV --full
-python ./scripts/run_publish_confluence.py --space ~NBUBEV --full
-python ./scripts/run_ingestion.py
-python ./scripts/build_vector_index.py
-python ./scripts/search_chunks.py "event mesh"
-python ./scripts/ask.py "event mesh kyma"
-python ./scripts/prepare_answer.py "event mesh kyma"
-python ./scripts/answer.py "event mesh kyma" --provider ollama --model llama3.1:8b
-```
-
-Weitere Retrieval-Beispiele:
-
-```bash
-python ./scripts/search_chunks.py "event mesh kyma" --mode keyword
-python ./scripts/search_chunks.py "event mesh kyma" --mode vector
-python ./scripts/search_chunks.py "event mesh kyma" --mode hybrid --top-k 10
-```
-
-### Beispielstruktur für Confluence-Export (MVP)
-
-```text
-~/local-knowledge-data/exports/confluence/
-  MYSPACE/
-    123456/
-      page.json
-    789012/
-      content.raw.json
-```
-
-Hinweis: Ingestion und Suche erwarten das separate Daten-Repo unter
-`~/local-knowledge-data`.
-
-## Lokale Ollama-Nutzung
-
-Für `scripts/answer.py` muss lokal ein Ollama-Server laufen, z. B.:
+1. Ollama installieren (siehe offizielle Ollama-Dokumentation).
+2. Server starten:
 
 ```bash
 ollama serve
-ollama run llama3.1:8b
 ```
 
-Standard-Endpunkt ist `http://localhost:11434`.
-Falls Ollama nicht erreichbar ist, liefert das Script eine klare Fehlermeldung mit Exit-Code ungleich 0.
+3. Modelle laden:
 
+```bash
+ollama pull llama3.1:8b
+ollama pull nomic-embed-text
+# optional
+ollama pull bge-m3
+```
 
-Publish-Mapping kann über `config/publish_confluence.toml` (oder `config/app.toml`) gesteuert werden:
+## Pipeline (kurz)
 
-```toml
-[publish.confluence.space_map]
-"~NBUBEV" = "sap/customers/xyz/projects/zzz/confluence"
+Confluence-Transform (optional) → Publish → Ingestion → Chunking → Vector-Index → Retrieval (Keyword/Vector/Hybrid) → Prompt → optionale LLM-Antwort.
 
-[publish.confluence.defaults]
-fallback_path = "_unmapped/confluence"
+## Wichtige Befehle
+
+```bash
+python ./scripts/run_ingestion.py
+python ./scripts/build_vector_index.py
+python ./scripts/answer.py "event mesh kyma"
+```
+
+Mit expliziter Embedding-Konfiguration:
+
+```bash
+python ./scripts/build_vector_index.py \
+  --embedding-provider ollama \
+  --embedding-model nomic-embed-text \
+  --ollama-url http://localhost:11434
+
+python ./scripts/answer.py "event mesh kyma" \
+  --model llama3.1:8b \
+  --base-url http://localhost:11434 \
+  --embedding-provider ollama \
+  --embedding-model nomic-embed-text \
+  --ollama-url http://localhost:11434
+```
+
+## Häufige Fehler
+
+### 1) `Connection refused` auf `localhost:11434`
+
+Ursache: Ollama läuft nicht.
+
+Lösung:
+
+```bash
+ollama serve
+```
+
+### 2) Modell nicht vorhanden
+
+Typische Meldung: Modell wurde nicht gefunden.
+
+Lösung:
+
+```bash
+ollama pull llama3.1:8b
+ollama pull nomic-embed-text
+```
+
+### 3) Index wurde mit anderem Embedding-Modell gebaut
+
+Typische Meldung:
+
+> „Der Vektorindex wurde mit Modell X erstellt, die Anfrage verwendet aber Modell Y. Bitte Index neu bauen.”
+
+Lösung: Index neu aufbauen (ggf. mit `--rebuild`).
+
+## Legacy-HF-Pfad (optional)
+
+Der sentence-transformers-Pfad bleibt nur für Migrationen erhalten und ist **nicht Standard**.
+Aktivierung nur explizit über `EMBEDDING_PROVIDER=sentence_transformers` oder CLI-Flag `--embedding-provider sentence_transformers`.
+
+Optionales Extra installieren:
+
+```bash
+pip install .[legacy-hf]
 ```

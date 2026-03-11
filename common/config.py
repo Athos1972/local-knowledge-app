@@ -41,3 +41,13 @@ class AppConfig:
             current = current[key]
 
         return current
+
+    @classmethod
+    def get_str(cls, env_key: str, *keys: str, default: str) -> str:
+        """Read string config with ENV override precedence."""
+        env_value = os.getenv(env_key)
+        if env_value is not None and env_value.strip():
+            return env_value.strip()
+
+        value = cls.get(*keys, default=default)
+        return str(value).strip() if value is not None else default

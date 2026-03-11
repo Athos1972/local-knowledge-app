@@ -9,8 +9,9 @@ from typing import Any
 
 from common.logging_setup import AppLogger
 from retrieval.chunk_repository import ChunkRecord
+from retrieval.embedding_provider import EmbeddingProvider
 from retrieval.keyword_search import SearchResult
-from retrieval.vector_index import _EmbeddingModel
+from retrieval.vector_index import VectorIndex
 
 logger = AppLogger.get_logger()
 
@@ -28,12 +29,12 @@ class VectorSearcher:
 
     def __init__(
         self,
+        embedding_provider: EmbeddingProvider,
         db_path: Path | None = None,
         chunks: list[ChunkRecord] | None = None,
-        model_name: str = "all-MiniLM-L6-v2",
     ):
         self.db_path = (db_path or (Path.home() / "local-knowledge-data" / "index" / "vector_index.sqlite")).expanduser()
-        self._embedder = _EmbeddingModel(model_name=model_name)
+        self.embedding_provider = embedding_provider
         self._chunk_lookup = {chunk.chunk_id: chunk for chunk in (chunks or [])}
 
     def search(self, query: str, top_k: int = 10) -> list[SearchResult]:
@@ -46,7 +47,8 @@ class VectorSearcher:
             logger.warning("No vectors found in %s. Did you run build_vector_index.py?", self.db_path)
             return []
 
-        query_vector = self._embedder.encode([normalized_query])[0]
+        self._validate_index_compatibility()
+        query_vector = self.embedding_provider.embed_query(normalized_query)
 
         scored: list[tuple[float, VectorChunk]] = []
         for row in vector_rows:
@@ -86,6 +88,29 @@ class VectorSearcher:
 
         logger.info("Vector search completed. query=%s hits=%s", normalized_query, len(results))
         return results
+
+    def _validate_index_compatibility(self) -> None:
+        index = VectorIndex(db_path=self.db_path, embedding_provider=self.embedding_provider)
+        metadata = index.get_metadata()
+        if not metadata:
+            return
+
+        index_model = metadata.get("embedding_model")
+        index_provider = metadata.get("embedding_provider")
+
+        if index_model and index_model != self.embedding_provider.model_name:
+            raise ValueError(
+                "Der Vektorindex wurde mit Modell "
+                f"{index_model} erstellt, die Anfrage verwendet aber Modell {self.embedding_provider.model_name}. "
+                "Bitte Index neu bauen."
+            )
+
+        if index_provider and index_provider != self.embedding_provider.provider_name:
+            raise ValueError(
+                "Der Vektorindex wurde mit Provider "
+                f"{index_provider} erstellt, die Anfrage verwendet aber Provider {self.embedding_provider.provider_name}. "
+                "Bitte Index neu bauen."
+            )
 
     def _load_vectors(self) -> list[VectorChunk]:
         if not self.db_path.exists():
