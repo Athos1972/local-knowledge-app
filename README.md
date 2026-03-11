@@ -209,3 +209,53 @@ Regeln sind in TOML konfigurierbar (Pfadpräfix, Teilstring, Dateiname, Fallback
 Die Mapping-Stufe ergänzt Domain-Metadaten, behält aber technische Transform-Metadaten bei.
 
 Beispielkonfiguration: `config/scraping_domain_mapping.toml`.
+
+## Audit-/Observability-Schicht für Ingestion & Indexing (neu)
+
+Die Pipeline schreibt jetzt strukturierte Audit-Events pro Run, Dokument und Stage nach SQLite (optional zusätzlich JSONL pro Run).
+
+### Zweck
+
+- Funnel-Analyse pro Run (`discover` → `load` → `transform` → `filter` → `chunk` → `embed` → `index`)
+- Trennung von `skipped` und `error`
+- Auswertung nach `reason_code` inkl. Beispieldokumenten
+- Diagnose, wo Dokumente in der Pipeline „verloren gehen"
+
+### Speicherorte
+
+Standardpfade unter `~/local-knowledge-data/system/audit/`:
+
+- `pipeline_audit.sqlite` (primäre Persistenz)
+- `runs/<run_id>.jsonl` (optionaler Event-Export)
+
+SQLite-Tabellen:
+- `pipeline_runs`
+- `document_stage_events`
+
+### Report ausführen
+
+```bash
+python scripts/audit_report.py
+python scripts/audit_report.py --date 2026-03-11 --source-type confluence
+python scripts/audit_report.py --run-id 20260311_194512_confluence_full --markdown-out reports/audit_today.md --csv-out reports/problem_documents.csv
+```
+
+### Funnel lesen
+
+- `discovered`: erkannte Dokumente
+- `loaded`: erfolgreich geladene Dokumente
+- `transformed`: erfolgreich transformierte Dokumente
+- `chunked_docs`: Dokumente mit erfolgreichem Chunk-Stage-Event
+- `chunks_created`: Summe erzeugter Chunks
+- `embedded_chunks` / `indexed_chunks`: verarbeitete Chunk-Mengen im Index-Lauf
+
+Der größte Unterschied zwischen zwei Stages ist der wichtigste Drop-Off.
+
+### Neue Quellen instrumentieren
+
+Neue Quellen können ohne neue Infrastruktur instrumentiert werden:
+
+1. Run-Kontext erstellen (`build_audit_components(...)`)
+2. Stage-Übergänge mit `with audit.stage(...):` umschließen
+3. Bei fachlichem Verwerfen `evt.skipped(<reason_code>)`, bei technischen Fehlern `evt.error(...)`
+4. Neue Reason-Codes zentral in `processing/audit/models.py` ergänzen (`ReasonCode`)

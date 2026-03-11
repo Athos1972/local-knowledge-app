@@ -20,6 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from common.logging_setup import AppLogger
+from processing.audit import AuditStage, ReasonCode, build_audit_components
 from processing.file_writer import FileWriter
 from processing.manifest import ProcessedDocumentRecord, RunManifest, generate_run_id
 from processing.markdown_normalizer import MarkdownNormalizer
@@ -39,6 +40,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Erzwingt komplette Neuverarbeitung aller Dokumente.",
     )
+    parser.add_argument("--run-id", dest="run_id", default=None, help="Optionale externe Run-ID für Audit/Logs")
+    parser.add_argument("--source-instance", dest="source_instance", default="local-filesystem")
     return parser.parse_args()
 
 
@@ -53,8 +56,9 @@ def main() -> int:
     state_path = manifests_dir / "latest_processing_state.json"
 
     mode = "full" if args.full_refresh else "incremental"
+    effective_run_id = args.run_id or generate_run_id()
     run_manifest = RunManifest(
-        run_id=generate_run_id(),
+        run_id=effective_run_id,
         started_at=utc_now_iso(),
         mode=mode,
     )
@@ -64,11 +68,40 @@ def main() -> int:
     chunker = MarkdownChunker()
     writer = FileWriter(data_root)
     state = ProcessingState.load(state_path)
+    run_context, audit = build_audit_components(
+        data_root=data_root,
+        source_type="filesystem",
+        source_instance=args.source_instance,
+        mode=mode,
+        run_id=effective_run_id,
+    )
 
     logger.info("Ingestion started. mode=%s run_id=%s", mode, run_manifest.run_id)
 
     for source_doc in loader.load():
         run_manifest.documents_seen += 1
+        with audit.stage(
+            run_id=run_context.run_id,
+            source_type="filesystem",
+            source_instance=args.source_instance,
+            stage=AuditStage.DISCOVER,
+            document_id=source_doc.doc_id,
+            document_uri=source_doc.source.source_ref,
+            document_title=source_doc.title,
+        ) as discover_evt:
+            discover_evt.event.output_count = 1
+
+        with audit.stage(
+            run_id=run_context.run_id,
+            source_type="filesystem",
+            source_instance=args.source_instance,
+            stage=AuditStage.LOAD,
+            document_id=source_doc.doc_id,
+            document_uri=source_doc.source.source_ref,
+            document_title=source_doc.title,
+        ) as load_evt:
+            load_evt.event.output_count = len(source_doc.content)
+
         source_checksum = stable_hash(source_doc.content)
         existing_state = state.documents.get(source_doc.doc_id)
 
@@ -77,6 +110,17 @@ def main() -> int:
             and existing_state is not None
             and existing_state.source_checksum == source_checksum
         ):
+            with audit.stage(
+                run_id=run_context.run_id,
+                source_type="filesystem",
+                source_instance=args.source_instance,
+                stage=AuditStage.FILTER,
+                document_id=source_doc.doc_id,
+                document_uri=source_doc.source.source_ref,
+                document_title=source_doc.title,
+            ) as filter_evt:
+                filter_evt.skipped(ReasonCode.FILTERED_BY_RULE, "Dokument unverändert (Checksumme identisch)")
+
             run_manifest.documents_skipped += 1
             processed_at = utc_now_iso()
             run_manifest.records.append(
@@ -99,10 +143,39 @@ def main() -> int:
             continue
 
         try:
-            normalized = normalizer.normalize(source_doc)
+            with audit.stage(
+                run_id=run_context.run_id,
+                source_type="filesystem",
+                source_instance=args.source_instance,
+                stage=AuditStage.TRANSFORM,
+                document_id=source_doc.doc_id,
+                document_uri=source_doc.source.source_ref,
+                document_title=source_doc.title,
+            ) as transform_evt:
+                transform_evt.event.input_count = len(source_doc.content)
+                normalized = normalizer.normalize(source_doc)
+                transform_evt.event.output_count = len(normalized.body)
+                if not normalized.body.strip():
+                    transform_evt.warning(ReasonCode.NO_TEXT_AFTER_CLEANUP, "Nach Normalisierung ist kein Text mehr vorhanden")
+
             writer.write_document(normalized)
 
-            chunks = chunker.chunk_document(normalized)
+            with audit.stage(
+                run_id=run_context.run_id,
+                source_type="filesystem",
+                source_instance=args.source_instance,
+                stage=AuditStage.CHUNK,
+                document_id=normalized.doc_id,
+                document_uri=normalized.source.source_ref,
+                document_title=normalized.title,
+            ) as chunk_evt:
+                chunk_evt.event.input_count = len(normalized.body)
+                chunks = chunker.chunk_document(normalized)
+                chunk_evt.event.chunk_count = len(chunks)
+                chunk_evt.event.output_count = len(chunks)
+                if not chunks:
+                    chunk_evt.skipped(ReasonCode.NO_CHUNKS_CREATED, "Chunking ergab keine Chunks")
+
             writer.write_chunks(normalized.doc_id, chunks)
 
             processed_at = utc_now_iso()
@@ -135,6 +208,17 @@ def main() -> int:
                 len(chunks),
             )
         except Exception as exc:  # noqa: BLE001 - Pipeline soll robust weiterlaufen.
+            with audit.stage(
+                run_id=run_context.run_id,
+                source_type="filesystem",
+                source_instance=args.source_instance,
+                stage=AuditStage.TRANSFORM,
+                document_id=source_doc.doc_id,
+                document_uri=source_doc.source.source_ref,
+                document_title=source_doc.title,
+            ) as error_evt:
+                error_evt.error(ReasonCode.UNKNOWN_EXCEPTION, str(exc))
+
             processed_at = utc_now_iso()
             run_manifest.documents_failed += 1
             run_manifest.records.append(
@@ -177,6 +261,7 @@ def main() -> int:
     )
     logger.info("Manifest written: %s", run_manifest_path)
     logger.info("Processing state written: %s", state_path)
+    run_context.finish(status="finished" if run_manifest.documents_failed == 0 else "finished_with_errors")
     return 0 if run_manifest.documents_failed == 0 else 1
 
 

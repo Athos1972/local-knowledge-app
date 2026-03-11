@@ -12,6 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from common.logging_setup import AppLogger
+from processing.audit import AuditStage, ReasonCode, build_audit_components
 from retrieval.chunk_repository import ChunkRepository
 from retrieval.embedding_provider import EmbeddingProviderError
 from retrieval.embedding_provider import build_embedding_provider
@@ -46,6 +47,8 @@ def parse_args() -> argparse.Namespace:
         default=settings.ollama_base_url,
         help="Ollama Base URL für Embeddings",
     )
+    parser.add_argument("--run-id", default=None, help="Optionale Run-ID für Audit-Korrelation")
+    parser.add_argument("--source-instance", default="local-index")
     return parser.parse_args()
 
 
@@ -53,12 +56,30 @@ def main() -> int:
     args = parse_args()
     logger = AppLogger.get_logger()
     started = perf_counter()
+    mode = "rebuild" if args.rebuild else "incremental"
+    run_context, audit = build_audit_components(
+        data_root=args.root,
+        source_type="filesystem",
+        source_instance=args.source_instance,
+        mode=mode,
+        run_id=args.run_id,
+    )
 
     repository = ChunkRepository(data_root=args.root)
-    chunks = repository.load_chunks()
+    with audit.stage(
+        run_id=run_context.run_id,
+        source_type="filesystem",
+        source_instance=args.source_instance,
+        stage=AuditStage.LOAD,
+        document_id="__all_chunks__",
+        document_title="all chunks",
+    ) as load_evt:
+        chunks = repository.load_chunks()
+        load_evt.event.output_count = len(chunks)
     logger.info("Loaded chunks for vector index build: %s", len(chunks))
 
     if not chunks:
+        run_context.finish(status="finished_with_errors")
         print("Keine Chunks gefunden. Bitte zuerst Ingestion ausführen.")
         return 1
 
@@ -71,12 +92,53 @@ def main() -> int:
             ollama_base_url=args.ollama_url,
         )
         index = VectorIndex(db_path=index_path, embedding_provider=embedding_provider)
-        written = index.build(chunks, rebuild=args.rebuild)
+        with audit.stage(
+            run_id=run_context.run_id,
+            source_type="filesystem",
+            source_instance=args.source_instance,
+            stage=AuditStage.EMBED,
+            document_id="__all_chunks__",
+            document_title="all chunks",
+        ) as embed_evt:
+            embed_evt.event.input_count = len(chunks)
+            written = index.build(chunks, rebuild=args.rebuild)
+            embed_evt.event.output_count = written
+
+        with audit.stage(
+            run_id=run_context.run_id,
+            source_type="filesystem",
+            source_instance=args.source_instance,
+            stage=AuditStage.INDEX,
+            document_id="__all_chunks__",
+            document_title="vector index",
+        ) as index_evt:
+            index_evt.event.input_count = len(chunks)
+            index_evt.event.output_count = written
     except EmbeddingProviderError as error:
+        with audit.stage(
+            run_id=run_context.run_id,
+            source_type="filesystem",
+            source_instance=args.source_instance,
+            stage=AuditStage.EMBED,
+            document_id="__all_chunks__",
+            document_title="all chunks",
+        ) as embed_error_evt:
+            embed_error_evt.error(ReasonCode.EMBED_EXCEPTION, str(error))
+        run_context.finish(status="finished_with_errors")
         logger.error("Embedding provider error: %s", error)
         print(f"Fehler beim Embedding-Provider ({args.embedding_provider}/{args.embedding_model}): {error}")
         return 2
     except ValueError as error:
+        with audit.stage(
+            run_id=run_context.run_id,
+            source_type="filesystem",
+            source_instance=args.source_instance,
+            stage=AuditStage.INDEX,
+            document_id="__all_chunks__",
+            document_title="vector index",
+        ) as index_error_evt:
+            index_error_evt.error(ReasonCode.INDEX_WRITE_EXCEPTION, str(error))
+        run_context.finish(status="finished_with_errors")
         logger.error("Index compatibility error: %s", error)
         print(str(error))
         return 2
@@ -100,6 +162,7 @@ def main() -> int:
         metadata.get("embedding_model", args.embedding_model),
         runtime_seconds,
     )
+    run_context.finish(status="finished")
     return 0
 
 
