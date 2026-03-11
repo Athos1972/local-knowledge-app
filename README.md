@@ -128,3 +128,24 @@ Optionales Extra installieren:
 ```bash
 pip install .[legacy-hf]
 ```
+
+## scrape2md-Export Import (Transfer-Stufe)
+
+Für die nachgelagerte Überführung von `scrape2md`-Exporten in die lokale Domainstruktur gibt es ein separates Script:
+
+```bash
+python scripts/import_scrape2md_export.py --config config/import_scrape2md_example.toml
+```
+
+Optional können Werte per CLI übersteuert werden:
+
+```bash
+python scripts/import_scrape2md_export.py \
+  --config config/import_scrape2md_example.toml \
+  --export-root /data/exports/docs.example.com \
+  --knowledge-root /data/local-knowledge \
+  --target-subpath domains/external/docs-example-com \
+  --dry-run
+```
+
+Das Tool übernimmt bewusst **kein Crawling** und **keine HTML→Markdown-Konvertierung**. Es importiert Markdown-Dateien aus `pages/`, nutzt Metadaten aus `manifest.json`, setzt/aktualisiert optional Frontmatter und schreibt die Dateien in die konfigurierte Zielstruktur.

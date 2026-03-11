@@ -1,0 +1,16 @@
+[source]
+export_root = "/path/to/exports/docs.example.com"
+source_key = "docs-example-com"
+
+[target]
+knowledge_root = "/path/to/local-knowledge-data"
+target_subpath = "domains/external/docs-example-com"
+
+[frontmatter]
+enabled = true
+title_from_first_heading = true
+
+[behavior]
+copy_assets = false
+overwrite = true
+dry_run = true
