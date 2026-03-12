@@ -113,6 +113,8 @@ class DeltaPlanEntry:
     sha256: str
     size_bytes: int
     action: str  # new | changed | unchanged | filtered | too_large
+    reason_code: str | None = None
+    reason_detail: str | None = None
 
 
 @dataclass(slots=True)
@@ -389,10 +391,10 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
                     document_id=entry.relative_path,
                     document_uri=entry.absolute_path.as_uri(),
                     document_title=entry.absolute_path.name,
-                    extra_json={"changed_flag": False, "is_dirty": False},
+                    extra_json={"is_dirty": None},
                 ) as filter_evt:
-                    reason_code = ReasonCode.IGNORE_SYSTEM_FILE if entry.action == "filtered" else ReasonCode.FILTERED_BY_RULE
-                    filter_evt.skipped(reason_code, f"Filtered action={entry.action}")
+                    reason_code = entry.reason_code or (ReasonCode.FILE_TOO_LARGE if entry.action == "too_large" else ReasonCode.FILTERED_BY_RULE)
+                    filter_evt.skipped(reason_code, entry.reason_detail or f"Filtered action={entry.action}")
                 manifest.records.append(_record(entry, status="skipped", reason=entry.action))
                 continue
 
@@ -409,7 +411,7 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
                     document_id=entry.relative_path,
                     document_uri=entry.absolute_path.as_uri(),
                     document_title=entry.absolute_path.name,
-                    extra_json={"changed_flag": False, "is_dirty": False},
+                    extra_json={"is_dirty": None},
                 ) as filter_evt:
                     filter_evt.skipped(ReasonCode.UNCHANGED_INCREMENTAL, "Datei unverändert")
                 manifest.records.append(_record(entry, status="skipped", reason="unchanged"))
@@ -539,12 +541,30 @@ def build_delta_plan(
         size = path.stat().st_size
         if ext not in allowed_extensions:
             entries.append(
-                DeltaPlanEntry(path, rel_path, infer_top_level_group(rel_path), "", size, "filtered")
+                DeltaPlanEntry(
+                    path,
+                    rel_path,
+                    infer_top_level_group(rel_path),
+                    "",
+                    size,
+                    "filtered",
+                    reason_code=_classify_filtered_reason(path),
+                    reason_detail=f"Datei gefiltert: {path.name}",
+                )
             )
             continue
         if size > max_file_size_bytes:
             entries.append(
-                DeltaPlanEntry(path, rel_path, infer_top_level_group(rel_path), "", size, "too_large")
+                DeltaPlanEntry(
+                    path,
+                    rel_path,
+                    infer_top_level_group(rel_path),
+                    "",
+                    size,
+                    "too_large",
+                    reason_code=ReasonCode.FILE_TOO_LARGE,
+                    reason_detail=f"Dateigröße {size} > Limit {max_file_size_bytes}",
+                )
             )
             continue
 
@@ -559,6 +579,17 @@ def build_delta_plan(
 
         entries.append(DeltaPlanEntry(path, rel_path, infer_top_level_group(rel_path), sha, size, action))
     return entries
+
+
+def _classify_filtered_reason(path: Path) -> str:
+    lower_name = path.name.lower()
+    if path.name.startswith("."):
+        return ReasonCode.IGNORE_HIDDEN_FILE
+    if lower_name == "_index.md":
+        return ReasonCode.IGNORE_INDEX_FILE
+    if lower_name in {"readme.md", "thumbs.db", ".ds_store"}:
+        return ReasonCode.IGNORE_SYSTEM_FILE
+    return ReasonCode.UNSUPPORTED_FILE_EXTENSION
 
 
 def infer_top_level_group(relative_path: str) -> str:

@@ -39,6 +39,7 @@ class AuditReportService:
                 "stage_stats": {},
                 "reason_codes": [],
                 "reason_codes_by_stage": {},
+                "reason_codes_by_run": {},
                 "drop_off": [],
                 "problem_documents": [],
                 "confluence_insights": {},
@@ -47,18 +48,21 @@ class AuditReportService:
             }
 
         events = self._query_events(run_ids)
+        run_types = self._classify_run_types(runs, events)
         funnel = self._build_funnel(events)
         return {
-            "runs": [dict(row) for row in runs],
+            "runs": [self._enrich_run(dict(row), run_types.get(row["run_id"], "mixed")) for row in runs],
             "funnel": funnel,
             "stage_stats": self._build_stage_stats(events),
             "reason_codes": self._build_reason_codes(events),
             "reason_codes_by_stage": self._build_reason_codes_by_stage(events),
+            "reason_codes_by_run": self._build_reason_codes_by_run(events),
             "drop_off": self._build_drop_off(funnel),
             "problem_documents": self._build_problem_documents(events),
             "confluence_insights": self._build_confluence_insights(events),
-            "quality": self._build_quality_metrics(funnel),
+            "quality": self._build_quality_metrics(funnel, run_types),
             "events": [dict(row) for row in events],
+            "run_types": run_types,
         }
 
     def build_drilldown(self, filters: ReportFilters) -> list[dict[str, Any]]:
@@ -70,29 +74,44 @@ class AuditReportService:
 
         events = self._query_events(run_ids)
         rows: list[dict[str, Any]] = []
+        by_doc: dict[tuple[str, str], list[Any]] = defaultdict(list)
         for event in events:
-            extra = _parse_extra_json(event["extra_json"])
-            warning_flags = _extract_warning_flags(event, extra)
-            changed_flag = extra.get("changed_flag")
-            if changed_flag is None and event["reason_code"] in {ReasonCode.UNCHANGED_INCREMENTAL, ReasonCode.UNCHANGED_SOURCE}:
-                changed_flag = False
+            if not event["document_id"]:
+                continue
+            by_doc[(event["run_id"], event["document_id"])].append(event)
+
+        for (run_id, document_id), doc_events in sorted(by_doc.items()):
+            latest = doc_events[-1]
+            source_type = latest["source_type"]
+            extra_items = [_parse_extra_json(evt["extra_json"]) for evt in doc_events]
+            warning_flags = sorted({flag for evt, extra in zip(doc_events, extra_items, strict=False) for flag in _extract_warning_flags(evt, extra)})
+            changed_flag = _resolve_changed_flag(doc_events, extra_items)
+            raw_text_length = _last_metric(doc_events, "input_count")
+            transformed_text_length = _last_transform_output(doc_events)
+            chunk_count = _last_metric(doc_events, "chunk_count")
+
             rows.append(
                 {
-                    "run_id": event["run_id"],
-                    "source_type": event["source_type"],
-                    "source_name": event["source_instance"],
-                    "document_id": event["document_id"],
-                    "title": event["document_title"],
-                    "stage": event["stage"],
-                    "status": event["status"],
-                    "reason_code": event["reason_code"],
-                    "reason_detail": event["message"],
-                    "raw_text_length": event["input_count"],
-                    "transformed_text_length": event["output_count"] if event["stage"] == AuditStage.TRANSFORM else None,
-                    "chunk_count": event["chunk_count"],
-                    "warning_flags": "|".join(warning_flags) if warning_flags else None,
+                    "run_id": run_id,
+                    "source_type": source_type,
+                    "source_name": latest["source_instance"],
+                    "document_id": document_id,
+                    "title": latest["document_title"],
+                    "stage": latest["stage"],
+                    "status": latest["status"],
+                    "reason_code": latest["reason_code"],
+                    "reason_detail": latest["message"],
                     "changed_flag": changed_flag,
-                    "is_dirty": extra.get("is_dirty"),
+                    "is_dirty": _last_extra(extra_items, "is_dirty"),
+                    "unchanged_flag": changed_flag is False,
+                    "raw_text_length": raw_text_length,
+                    "transformed_text_length": transformed_text_length,
+                    "chunk_count": chunk_count,
+                    "warning_flags": "|".join(warning_flags) if warning_flags else None,
+                    "source_path": latest["document_uri"],
+                    "file_path": latest["document_uri"] if source_type in {"filesystem", "anythingllm_ingest"} else None,
+                    "page_id": document_id if source_type == "confluence" else None,
+                    "content_id": _last_extra(extra_items, "content_id"),
                 }
             )
         return rows
@@ -117,7 +136,7 @@ class AuditReportService:
     def _query_events(self, run_ids: list[str]) -> list[Any]:
         placeholders = ",".join("?" for _ in run_ids)
         return self.repository.query(
-            f"SELECT * FROM document_stage_events WHERE run_id IN ({placeholders}) ORDER BY created_at ASC",
+            f"SELECT * FROM document_stage_events WHERE run_id IN ({placeholders}) ORDER BY created_at ASC, id ASC",
             tuple(run_ids),
         )
 
@@ -125,14 +144,14 @@ class AuditReportService:
         by_run: dict[str, dict[str, int]] = {}
         for run_id in {row["run_id"] for row in events}:
             run_events = [e for e in events if e["run_id"] == run_id]
-            unchanged = self._count_docs_by_reason(run_events, AuditStage.FILTER, AuditStatus.SKIPPED, UNCHANGE_REASONS)
-            filtered = self._count_docs_by_reason(run_events, AuditStage.FILTER, AuditStatus.SKIPPED, None) - unchanged
+            unchanged_docs = self._find_unchanged_docs(run_events)
+            filter_skipped_docs = self._find_filter_skipped_docs(run_events)
             transformed_ok = self._count_docs(run_events, AuditStage.TRANSFORM, {AuditStatus.OK, AuditStatus.WARNING})
             by_run[run_id] = {
                 "discovered": self._count_docs(run_events, AuditStage.DISCOVER, {AuditStatus.OK, AuditStatus.WARNING}),
                 "loaded": self._count_docs(run_events, AuditStage.LOAD, {AuditStatus.OK, AuditStatus.WARNING}),
-                "unchanged_skipped": max(0, unchanged),
-                "filtered_skipped": max(0, filtered),
+                "unchanged_skipped": len(unchanged_docs),
+                "filtered_skipped": len(filter_skipped_docs - unchanged_docs),
                 "transform_failed": self._count_docs(run_events, AuditStage.TRANSFORM, {AuditStatus.ERROR}),
                 "transformed_ok": transformed_ok,
                 "transformed": transformed_ok,
@@ -143,20 +162,26 @@ class AuditReportService:
             }
         return by_run
 
+    def _find_filter_skipped_docs(self, events: list[Any]) -> set[str]:
+        return {
+            e["document_id"]
+            for e in events
+            if e["stage"] == AuditStage.FILTER and e["status"] == AuditStatus.SKIPPED and e["document_id"]
+        }
+
+    def _find_unchanged_docs(self, events: list[Any]) -> set[str]:
+        unchanged: set[str] = set()
+        for event in events:
+            if event["stage"] != AuditStage.FILTER or event["status"] != AuditStatus.SKIPPED or not event["document_id"]:
+                continue
+            extra = _parse_extra_json(event["extra_json"])
+            changed_flag = extra.get("changed_flag")
+            if event["reason_code"] in UNCHANGE_REASONS or (changed_flag is False and not event["reason_code"]):
+                unchanged.add(event["document_id"])
+        return unchanged
+
     def _count_docs(self, events: list[Any], stage: str, statuses: set[str]) -> int:
         return len({e["document_id"] for e in events if e["stage"] == stage and e["status"] in statuses and e["document_id"]})
-
-    def _count_docs_by_reason(self, events: list[Any], stage: str, status: str, reasons: set[str] | None) -> int:
-        return len(
-            {
-                e["document_id"]
-                for e in events
-                if e["stage"] == stage
-                and e["status"] == status
-                and e["document_id"]
-                and (reasons is None or e["reason_code"] in reasons)
-            }
-        )
 
     def _build_stage_stats(self, events: list[Any]) -> dict[str, dict[str, int]]:
         stats: dict[str, dict[str, int]] = defaultdict(lambda: {"ok": 0, "warning": 0, "skipped": 0, "error": 0})
@@ -197,6 +222,19 @@ class AuditReportService:
             ]
         return result
 
+    def _build_reason_codes_by_run(self, events: list[Any]) -> dict[str, list[dict[str, Any]]]:
+        grouped: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for event in events:
+            if event["reason_code"]:
+                grouped[event["run_id"]][event["reason_code"]] += 1
+        return {
+            run_id: [
+                {"reason_code": reason_code, "count": count}
+                for reason_code, count in sorted(rows.items(), key=lambda item: item[1], reverse=True)
+            ]
+            for run_id, rows in grouped.items()
+        }
+
     def _build_drop_off(self, funnel: dict[str, dict[str, int]]) -> list[dict[str, Any]]:
         all_drops = []
         for run_id, values in funnel.items():
@@ -210,22 +248,57 @@ class AuditReportService:
                 all_drops.append({"run_id": run_id, "from": prev_name, "to": nxt_name, "drop": max(0, prev_count - nxt_count)})
         return sorted(all_drops, key=lambda item: item["drop"], reverse=True)
 
-    def _build_quality_metrics(self, funnel: dict[str, dict[str, int]]) -> dict[str, dict[str, float | int | str]]:
-        quality: dict[str, dict[str, float | int | str]] = {}
+    def _classify_run_types(self, runs: list[Any], events: list[Any]) -> dict[str, str]:
+        events_by_run: dict[str, set[str]] = defaultdict(set)
+        for event in events:
+            events_by_run[event["run_id"]].add(event["stage"])
+
+        run_types: dict[str, str] = {}
+        for run in runs:
+            run_id = run["run_id"]
+            stages = events_by_run.get(run_id, set())
+            source_type = run["source_type"]
+            if source_type == "anythingllm_ingest":
+                run_type = "ingest"
+            elif AuditStage.INDEX in stages and AuditStage.TRANSFORM not in stages:
+                run_type = "index"
+            elif AuditStage.EMBED in stages and AuditStage.TRANSFORM not in stages and AuditStage.INDEX not in stages:
+                run_type = "ingest"
+            elif AuditStage.TRANSFORM in stages:
+                run_type = "transform"
+            elif AuditStage.CHUNK in stages:
+                run_type = "chunk"
+            else:
+                run_type = "mixed"
+            run_types[run_id] = run_type
+        return run_types
+
+    def _build_quality_metrics(self, funnel: dict[str, dict[str, int]], run_types: dict[str, str]) -> dict[str, dict[str, float | int | str | None]]:
+        quality: dict[str, dict[str, float | int | str | None]] = {}
         for run_id, values in funnel.items():
             loaded = values["loaded"]
             transformed_ok = values["transformed_ok"]
-            transformed_base = max(1, loaded)
-            chunk_base = max(1, transformed_ok)
             chunks_created = values["chunks_created"]
-            quality[run_id] = {
-                "transform_quote": transformed_ok / transformed_base,
-                "chunk_quote": values["chunked_docs"] / chunk_base,
-                "index_quote": values["indexed_chunks"] / max(1, chunks_created),
+            run_type = run_types.get(run_id, "mixed")
+            metrics: dict[str, float | int | str | None] = {
+                "run_type": run_type,
                 "largest_loss_semantic": "loaded->candidate_for_transform" if values["unchanged_skipped"] >= values["filtered_skipped"] + values["transform_failed"] else "candidate_for_transform->transformed_ok",
                 "candidate_for_transform": max(0, loaded - values["unchanged_skipped"]),
+                "transform_quote": None,
+                "chunk_quote": None,
+                "index_quote": None,
             }
+            if run_type in {"transform", "chunk", "mixed"}:
+                metrics["transform_quote"] = transformed_ok / max(1, loaded)
+                metrics["chunk_quote"] = values["chunked_docs"] / max(1, transformed_ok)
+            if run_type in {"index", "mixed"} and chunks_created > 0:
+                metrics["index_quote"] = values["indexed_chunks"] / chunks_created
+            quality[run_id] = metrics
         return quality
+
+    def _enrich_run(self, run: dict[str, Any], run_type: str) -> dict[str, Any]:
+        run["run_type"] = run_type
+        return run
 
     def _build_problem_documents(self, events: list[Any]) -> list[dict[str, Any]]:
         latest_problem: dict[str, Any] = {}
@@ -294,11 +367,47 @@ def _extract_warning_flags(event: Any, extra_json: dict[str, Any]) -> list[str]:
     return sorted(set(flags))
 
 
+def _resolve_changed_flag(events: list[Any], extras: list[dict[str, Any]]) -> bool | None:
+    for extra in reversed(extras):
+        if "changed_flag" in extra:
+            return extra["changed_flag"]
+    for event in reversed(events):
+        if event["reason_code"] in UNCHANGE_REASONS:
+            return False
+    return None
+
+
+def _last_metric(events: list[Any], key: str) -> int | None:
+    for event in reversed(events):
+        value = event[key]
+        if value is not None:
+            return value
+    return None
+
+
+def _last_transform_output(events: list[Any]) -> int | None:
+    for event in reversed(events):
+        if event["stage"] == AuditStage.TRANSFORM and event["output_count"] is not None:
+            return event["output_count"]
+    return None
+
+
+def _last_extra(extras: list[dict[str, Any]], key: str) -> Any:
+    for extra in reversed(extras):
+        if key in extra:
+            return extra[key]
+    return None
+
+
+def _fmt_percent(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:.1%}"
+
+
 def render_console(report: dict[str, Any]) -> str:
     lines = ["=== Audit-Report ===", "", "Runs:"]
     for run in report["runs"]:
         lines.append(
-            f"- {run['run_id']} | {run['started_at']} - {run.get('finished_at') or '-'} | {run['source_type']} | {run.get('source_instance') or '-'} | {run.get('mode') or '-'} | {run['status']} | events={run['total_events']}"
+            f"- {run['run_id']} | {run['started_at']} - {run.get('finished_at') or '-'} | {run['source_type']} | {run.get('source_instance') or '-'} | {run.get('mode') or '-'} | type={run.get('run_type', 'mixed')} | {run['status']} | events={run['total_events']}"
         )
 
     lines.append("\nFunnel pro Run:")
@@ -306,10 +415,11 @@ def render_console(report: dict[str, Any]) -> str:
         quality = report["quality"].get(run_id, {})
         lines.append(f"- {run_id}: {funnel}")
         lines.append(
-            "  Transform-Quote={:.1%} | Chunk-Quote={:.1%} | Index-Quote={:.1%} | candidate_for_transform={}".format(
-                quality.get("transform_quote", 0.0),
-                quality.get("chunk_quote", 0.0),
-                quality.get("index_quote", 0.0),
+            "  run_type={} | Transform-Quote={} | Chunk-Quote={} | Index-Quote={} | candidate_for_transform={}".format(
+                quality.get("run_type", "mixed"),
+                _fmt_percent(quality.get("transform_quote")),
+                _fmt_percent(quality.get("chunk_quote")),
+                _fmt_percent(quality.get("index_quote")),
                 quality.get("candidate_for_transform", 0),
             )
         )
@@ -327,24 +437,15 @@ def render_console(report: dict[str, Any]) -> str:
         top = ", ".join(f"{row['reason_code']}={row['count']}" for row in items[:5])
         lines.append(f"- {stage}: {top or '-'}")
 
+    if report.get("reason_codes_by_run"):
+        lines.append("\nTop-Reason-Codes je Run:")
+        for run_id, items in report["reason_codes_by_run"].items():
+            top = ", ".join(f"{row['reason_code']}={row['count']}" for row in items[:5])
+            lines.append(f"- {run_id}: {top or '-'}")
+
     if report["drop_off"]:
         top = report["drop_off"][0]
         lines.append(f"\nGrößter Drop-Off: {top['run_id']} {top['from']} -> {top['to']} = {top['drop']}")
-
-    worst = sorted(
-        (
-            {
-                "run_id": run_id,
-                "transform_quote": metrics.get("transform_quote", 0.0),
-            }
-            for run_id, metrics in report["quality"].items()
-        ),
-        key=lambda item: item["transform_quote"],
-    )
-    if worst:
-        lines.append("\nRuns mit niedrigster Transform-Quote:")
-        for row in worst[:5]:
-            lines.append(f"- {row['run_id']}: {row['transform_quote']:.1%}")
 
     return "\n".join(lines)
 
@@ -352,11 +453,11 @@ def render_console(report: dict[str, Any]) -> str:
 def render_markdown(report: dict[str, Any]) -> str:
     now = datetime.now().isoformat(timespec="seconds")
     lines = [f"# Audit-Report ({now})", "", "## Run-Übersicht"]
-    lines.append("| run_id | started_at | finished_at | source_type | source_instance | mode | status | events |")
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("| run_id | started_at | finished_at | source_type | source_instance | mode | run_type | status | events |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
     for run in report["runs"]:
         lines.append(
-            f"| {run['run_id']} | {run['started_at']} | {run.get('finished_at') or '-'} | {run['source_type']} | {run.get('source_instance') or '-'} | {run.get('mode') or '-'} | {run['status']} | {run['total_events']} |"
+            f"| {run['run_id']} | {run['started_at']} | {run.get('finished_at') or '-'} | {run['source_type']} | {run.get('source_instance') or '-'} | {run.get('mode') or '-'} | {run.get('run_type', 'mixed')} | {run['status']} | {run['total_events']} |"
         )
     lines.append("\n## Funnel pro Run")
     for run_id, funnel in report["funnel"].items():
@@ -388,12 +489,17 @@ def export_drilldown_csv(rows: list[dict[str, Any]], csv_path: Path) -> None:
             "status",
             "reason_code",
             "reason_detail",
+            "changed_flag",
+            "is_dirty",
+            "unchanged_flag",
             "raw_text_length",
             "transformed_text_length",
             "chunk_count",
             "warning_flags",
-            "changed_flag",
-            "is_dirty",
+            "source_path",
+            "file_path",
+            "page_id",
+            "content_id",
         ]
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()

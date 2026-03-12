@@ -36,6 +36,8 @@ class ReasonCode(StrEnum):
     IGNORE_HIDDEN_FILE = "ignore_hidden_file"
     IGNORE_SYSTEM_FILE = "ignore_system_file"
     IGNORE_INDEX_FILE = "ignore_index_file"
+    UNSUPPORTED_FILE_EXTENSION = "unsupported_file_extension"
+    FILE_TOO_LARGE = "file_too_large"
     UNCHANGED_INCREMENTAL = "unchanged_incremental"
     EMPTY_DOCUMENT = "empty_document"
     PERMISSION_DENIED = "permission_denied"

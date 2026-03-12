@@ -295,7 +295,8 @@ SQLite-Tabellen:
 python scripts/audit_report.py
 python scripts/audit_report.py --date 2026-03-11 --source-type confluence
 python scripts/audit_report.py --run-id 20260311_194512_confluence_full --markdown-out reports/audit_today.md --csv-out reports/problem_documents.csv
-python scripts/audit_report.py --run-id 20260311_194512_confluence_full --drilldown --output-format json --output reports/audit_drilldown.json
+python scripts/audit_report.py --run-id 20260311_194512_confluence_full --drilldown --drilldown-format json --output reports/audit/audit_drilldown.json
+python scripts/audit_report.py --run-id 20260311_194512_confluence_full --format csv --output reports/audit/audit_drilldown.csv
 ```
 
 ### Funnel lesen
@@ -310,22 +311,24 @@ python scripts/audit_report.py --run-id 20260311_194512_confluence_full --drilld
 - `chunks_created`: Summe erzeugter Chunks
 - `embedded_chunks` / `indexed_chunks`: verarbeitete Chunk-Mengen im Index-Lauf
 
-Zusätzlich zeigt der Report Quoten und Semantik:
+Zusätzlich zeigt der Report Quoten und Semantik (run-typ-spezifisch):
 
-- `Transform-Quote = transformed_ok / loaded`
-- `Chunk-Quote = chunked_docs / transformed_ok`
-- `Index-Quote = indexed_chunks / chunks_created`
+- `transform`-Run: `Transform-Quote`, `Chunk-Quote`
+- `index`-Run: nur `Index-Quote` (falls `chunks_created > 0`, sonst `n/a`)
+- `ingest`-Run: keine irreführende Transform-Quote (`n/a`)
+- `mixed`/`chunk`: Quoten nur wenn Zähler/Nenner fachlich passen
 - Größter Drop-Off mit Kontext (`loaded -> candidate_for_transform -> transformed_ok`), damit hohe `unchanged_skipped` nicht als Verlust fehlinterpretiert werden.
 
 ### Drilldown für problematische Runs
 
-Mit `--drilldown` wird eine Detailansicht pro Dokument/Stage als CSV oder JSON exportiert (Default-Ziel: `reports/`). Enthalten sind u. a.:
+Mit `--drilldown` wird eine Detailansicht **pro Dokument** als CSV oder JSON exportiert (Default-Ziel: `reports/audit/`). Enthalten sind u. a.:
 
 - `run_id`, `source_type`, `source_name`
-- `document_id`, `title`, `stage`, `status`
+- `document_id`, `title`, letzter `stage`/`status`
 - `reason_code`, `reason_detail`
+- `changed_flag`, `is_dirty`, `unchanged_flag`
 - `raw_text_length`, `transformed_text_length`, `chunk_count`
-- `warning_flags`, `changed_flag`, `is_dirty`
+- `warning_flags`, `source_path`, optional `file_path`/`page_id`/`content_id`
 
 Beispiel (JSON):
 
@@ -353,3 +356,19 @@ Neue Quellen können ohne neue Infrastruktur instrumentiert werden:
 3. Bei fachlichem Verwerfen `evt.skipped(<reason_code>)`, bei technischen Fehlern `evt.error(...)`
 4. Neue Reason-Codes zentral in `processing/audit/models.py` ergänzen (`ReasonCode`) – stabile IDs statt Freitext
 5. Für neue Filterregeln möglichst spezifische Codes vergeben (z. B. `ignore_hidden_file`, `empty_after_transform`) und optional strukturierte Details in `extra_json` ablegen
+
+
+### Reason-Codes & Erweiterungsregeln
+
+Wichtige Filter-/Skip-Codes sind jetzt granular statt generisch `filtered_by_rule`, z. B.:
+
+- `ignore_hidden_file`, `ignore_system_file`, `ignore_index_file`
+- `unsupported_file_extension`, `file_too_large`
+- `unchanged_incremental` (zählt zu `unchanged_skipped`, nicht zu `filtered_skipped`)
+- `empty_after_transform`, `no_chunks_created`, `transform_exception`
+
+Empfehlung bei neuen Regeln:
+
+1. Pro Regel **einen stabilen `reason_code`** vergeben.
+2. Optional Detailkontext in `message`/`extra_json` speichern.
+3. Neue Codes zentral in `processing/audit/models.py` ergänzen, damit Reports aggregierbar bleiben.

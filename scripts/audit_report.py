@@ -30,12 +30,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--source-type", default=None)
     parser.add_argument("--source-instance", default=None)
-    parser.add_argument("--format", choices=["console", "markdown"], default="console")
+    parser.add_argument("--format", choices=["console", "markdown", "csv", "json"], default="console")
     parser.add_argument("--markdown-out", default=None)
     parser.add_argument("--csv-out", default=None)
     parser.add_argument("--drilldown", action="store_true", help="Detaillierten Dokument-Drilldown exportieren")
     parser.add_argument("--output", default=None, help="Ausgabepfad für Drilldown-CSV/JSON")
-    parser.add_argument("--output-format", choices=["csv", "json"], default="csv", help="Format für Drilldown-Ausgabe")
+    parser.add_argument("--output-format", "--drilldown-format", dest="output_format", choices=["csv", "json"], default=None, help="Format für Drilldown-Ausgabe")
     return parser.parse_args()
 
 
@@ -53,8 +53,12 @@ def main() -> int:
     )
     report = service.build_report(filters)
 
+    if args.format in {"csv", "json"}:
+        args.drilldown = True
+        args.output_format = args.format
     output = render_markdown(report) if args.format == "markdown" else render_console(report)
-    print(output)
+    if args.format in {"console", "markdown"}:
+        print(output)
 
     if args.markdown_out:
         out_path = Path(args.markdown_out)
@@ -69,9 +73,10 @@ def main() -> int:
 
     if args.drilldown:
         rows = service.build_drilldown(filters)
-        default_name = f"audit_drilldown_{args.run_id or report_date.isoformat()}.{args.output_format}"
-        output_path = Path(args.output or (Path("reports") / default_name))
-        if args.output_format == "json":
+        drilldown_format = args.output_format or "csv"
+        default_name = f"audit_drilldown_{args.run_id or report_date.isoformat()}.{drilldown_format}"
+        output_path = Path(args.output or (Path("reports") / "audit" / default_name))
+        if drilldown_format == "json":
             export_drilldown_json(rows, output_path)
         else:
             export_drilldown_csv(rows, output_path)
