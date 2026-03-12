@@ -21,6 +21,15 @@ DEFAULT_ALLOWED_EXTENSIONS = {".md", ".txt", ".json", ".html", ".csv"}
 TRANSIENT_STATUS_CODES = {408, 409, 425, 429, 500, 502, 503, 504}
 
 
+class AnythingLLMRequestError(RuntimeError):
+    """Strukturierter Request-Fehler für AnythingLLM API Calls."""
+
+    def __init__(self, message: str, *, status_code: int | None = None, response_text: str | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_text = response_text
+
+
 @dataclass(slots=True)
 class AnythingLLMFileStateRecord:
     sha256: str
@@ -118,6 +127,8 @@ class AnythingLLMIngestConfig:
     upload_file_field: str
     upload_folder_field: str
     workspace_attach_path_template: str
+    workspace_attach_documents_key: str
+    workspace_attach_force_key: str
     timeout_seconds: int
     max_retries: int
     retry_backoff_seconds: float
@@ -193,6 +204,20 @@ class AnythingLLMIngestConfig:
                 "workspace_attach_path_template",
                 default="/api/v1/workspace/{workspace}/update-embeddings",
             ),
+            workspace_attach_documents_key=AppConfig.get_str(
+                "ANYTHINGLLM_WORKSPACE_ATTACH_DOCUMENTS_KEY",
+                "anythingllm",
+                "api",
+                "workspace_attach_documents_key",
+                default="adds",
+            ),
+            workspace_attach_force_key=AppConfig.get_str(
+                "ANYTHINGLLM_WORKSPACE_ATTACH_FORCE_KEY",
+                "anythingllm",
+                "api",
+                "workspace_attach_force_key",
+                default="reembed",
+            ),
             timeout_seconds=int(AppConfig.get_str("ANYTHINGLLM_TIMEOUT_SECONDS", "anythingllm", "timeout_seconds", default="30")),
             max_retries=int(AppConfig.get_str("ANYTHINGLLM_MAX_RETRIES", "anythingllm", "max_retries", default="3")),
             retry_backoff_seconds=float(AppConfig.get_str("ANYTHINGLLM_RETRY_BACKOFF_SECONDS", "anythingllm", "retry_backoff_seconds", default="1.0")),
@@ -241,10 +266,39 @@ class AnythingLLMClient:
 
     def embed_in_workspace(self, *, workspace: str, document_location: str, force_reembed: bool) -> None:
         path = self.config.workspace_attach_path_template.format(workspace=workspace)
-        payload: dict[str, Any] = {"adds": [document_location]}
-        if force_reembed:
-            payload["reembed"] = True
-        self._request(path, method="POST", json_body=payload)
+        payload_candidates = _build_embed_payload_candidates(
+            document_location=document_location,
+            force_reembed=force_reembed,
+            preferred_documents_key=self.config.workspace_attach_documents_key,
+            preferred_force_key=self.config.workspace_attach_force_key,
+        )
+        last_error: AnythingLLMRequestError | None = None
+        for payload in payload_candidates:
+            try:
+                self._request(
+                    path,
+                    method="POST",
+                    json_body=payload,
+                    request_context={"embed_payload": json.dumps(payload, ensure_ascii=False)},
+                )
+                return
+            except AnythingLLMRequestError as exc:
+                last_error = exc
+                # Bei 400/422 versuchen wir alternative Payload-Schemata für API-Versionen.
+                if exc.status_code in {400, 422}:
+                    continue
+                raise
+
+        tried = ", ".join(json.dumps(item, ensure_ascii=False) for item in payload_candidates)
+        if last_error is not None:
+            raise AnythingLLMRequestError(
+                f"Workspace-Embedding fehlgeschlagen nach Payload-Varianten. tried=[{tried}]",
+                status_code=last_error.status_code,
+                response_text=last_error.response_text,
+            ) from last_error
+        raise AnythingLLMRequestError(
+            f"Workspace-Embedding fehlgeschlagen ohne API-Response. tried=[{tried}]"
+        )
 
     def _request(
         self,
@@ -282,25 +336,29 @@ class AnythingLLMClient:
                 context_msg = f" context=({', '.join(context_parts)})" if context_parts else ""
 
                 if _is_non_transient_api_drift_error(response_text):
-                    raise RuntimeError(
+                    raise AnythingLLMRequestError(
                         f"AnythingLLM request failed ({exc.code}) {method} {path}:{context_msg} {response_text}. "
                         "Erkannter nicht-transienter API-Fehler (z.B. Feldname/Schema). "
-                        "Bitte Endpoint und Multipart-Feldnamen gegen <base_url>/api/docs prüfen."
+                        "Bitte Endpoint/Payload gegen <base_url>/api/docs prüfen.",
+                        status_code=exc.code,
+                        response_text=response_text,
                     ) from exc
 
                 if exc.code in TRANSIENT_STATUS_CODES and attempt < self.config.max_retries:
                     sleep(self.config.retry_backoff_seconds * attempt)
                     continue
-                raise RuntimeError(
+                raise AnythingLLMRequestError(
                     f"AnythingLLM request failed ({exc.code}) {method} {path}:{context_msg} {response_text}. "
-                    "Falls Endpoint/Payload nicht passt: API-Drift gegen <base_url>/api/docs prüfen."
+                    "Falls Endpoint/Payload nicht passt: API-Drift gegen <base_url>/api/docs prüfen.",
+                    status_code=exc.code,
+                    response_text=response_text,
                 ) from exc
             except (error.URLError, TimeoutError) as exc:
                 if attempt < self.config.max_retries:
                     sleep(self.config.retry_backoff_seconds * attempt)
                     continue
-                raise RuntimeError(f"AnythingLLM request timeout/network error for {method} {path}: {exc}") from exc
-        raise RuntimeError(f"AnythingLLM request failed after retries for {method} {path}")
+                raise AnythingLLMRequestError(f"AnythingLLM request timeout/network error for {method} {path}: {exc}") from exc
+        raise AnythingLLMRequestError(f"AnythingLLM request failed after retries for {method} {path}")
 
 
 def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, AnythingLLMIngestManifest]:
@@ -618,3 +676,47 @@ def _is_non_transient_api_drift_error(response_text: str) -> bool:
         "missing field",
     ]
     return any(marker in text for marker in markers)
+
+
+def _build_embed_payload_candidates(
+    *,
+    document_location: str,
+    force_reembed: bool,
+    preferred_documents_key: str,
+    preferred_force_key: str,
+) -> list[dict[str, Any]]:
+    """Erzeugt kompatible Payload-Varianten für Workspace-Embedding.
+
+    Hintergrund: AnythingLLM-API-Schemata können je Version leicht variieren.
+    """
+    doc_keys: list[str] = []
+    for key in [preferred_documents_key, "adds", "documents", "paths"]:
+        normalized = key.strip()
+        if normalized and normalized not in doc_keys:
+            doc_keys.append(normalized)
+
+    force_keys: list[str] = []
+    for key in [preferred_force_key, "reembed", "reEmbed", "embed"]:
+        normalized = key.strip()
+        if normalized and normalized not in force_keys:
+            force_keys.append(normalized)
+
+    candidates: list[dict[str, Any]] = []
+    for doc_key in doc_keys:
+        base = {doc_key: [document_location]}
+        candidates.append(dict(base))
+        if force_reembed:
+            for force_key in force_keys:
+                payload = dict(base)
+                payload[force_key] = True
+                candidates.append(payload)
+
+    deduped: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = json.dumps(candidate, sort_keys=True, ensure_ascii=False)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
