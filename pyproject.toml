@@ -27,5 +27,5 @@ legacy-hf = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["common*", "processing*", "sources*", "retrieval*", "local_knowledge_app*"]
+include = ["common*", "llm*", "processing*", "sources*", "retrieval*", "transformers*", "pipelines*", "local_knowledge_app*"]
 exclude = ["scripts*", "config*"]

@@ -7,7 +7,7 @@ import sys
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from local_knowledge_app.pipelines.domain_mapping import MapRunConfig, run_mapping
+from pipelines.domain_mapping import MapRunConfig, run_mapping
 
 
 def build_parser() -> argparse.ArgumentParser:

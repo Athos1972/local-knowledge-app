@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from common.config import AppConfig
-from local_knowledge_app.pipelines.scraping_transform import TransformRunConfig, run_transform
+from pipelines.scraping_transform import TransformRunConfig, run_transform
 
 
 def build_parser() -> argparse.ArgumentParser:

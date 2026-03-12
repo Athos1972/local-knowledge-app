@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from local_knowledge_app.pipelines.scraping_transform import _build_metadata_payload
+from pipelines.scraping_transform import _build_metadata_payload
 
 
 def test_metadata_payload_contains_required_fields(tmp_path: Path) -> None:

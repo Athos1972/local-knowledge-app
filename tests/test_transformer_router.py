@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from local_knowledge_app.transformers.router import TransformRouter
+from transformers.router import TransformRouter
 
 
 def test_router_resolves_markitdown_for_supported_file() -> None:

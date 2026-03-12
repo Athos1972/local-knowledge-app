@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import types
 
-from local_knowledge_app.transformers.markitdown_transformer import MarkItDownTransformer
+from transformers.markitdown_transformer import MarkItDownTransformer
 
 
 class _FakeResult:

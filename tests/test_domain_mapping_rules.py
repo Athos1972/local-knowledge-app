@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from local_knowledge_app.pipelines.domain_mapping import (
+from pipelines.domain_mapping import (
     MappingConfig,
     MappingRule,
     choose_mapping_rule,

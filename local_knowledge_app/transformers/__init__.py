@@ -1,6 +1,7 @@
-"""Transformer adapters and routing for external scraped assets."""
+"""Compatibility wrappers for legacy local_knowledge_app.transformers imports."""
 
-from .models import TransformResult
-from .router import TransformRouter
+from transformers.markitdown_transformer import MarkItDownTransformer
+from transformers.models import TransformResult
+from transformers.router import TransformRouter
 
-__all__ = ["TransformResult", "TransformRouter"]
+__all__ = ["MarkItDownTransformer", "TransformResult", "TransformRouter"]
