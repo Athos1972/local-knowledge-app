@@ -13,12 +13,11 @@ _SUPPORTED_EXTENSIONS = {
     ".pptx",
     ".xlsx",
     ".xls",
-    ".html",
-    ".htm",
     ".csv",
     ".json",
     ".xml",
     ".epub",
+    ".xsd",
 }
 
 
