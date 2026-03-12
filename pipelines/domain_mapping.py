@@ -125,6 +125,14 @@ def run_mapping(config: MapRunConfig) -> MapRunStats:
             stats.failed += 1
             stats.records.append({"status": "failed", "meta_path": str(meta_path), "error": str(exc)})
 
+    LOGGER.info(
+        "Scraping-Mapping beendet. seen=%s mapped=%s skipped=%s failed=%s",
+        stats.seen,
+        stats.mapped,
+        stats.skipped,
+        stats.failed,
+    )
+
     return stats
 
 

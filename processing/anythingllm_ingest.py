@@ -361,6 +361,14 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
     final_status = "running"
     exit_code = 1
 
+    logger.info(
+        "AnythingLLM ingest started. run_id=%s mode=%s ingest_dir=%s workspace=%s",
+        manifest.run_id,
+        manifest.mode,
+        manifest.ingest_dir,
+        config.workspace,
+    )
+
     try:
         entries = build_delta_plan(config.ingest_dir, config.allowed_extensions, config.max_file_size_bytes, state)
 
@@ -380,7 +388,7 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
                 pass
 
             if entry.action in {"filtered", "too_large"}:
-                logger.info("File discovered but filtered. file=%s reason=%s", entry.relative_path, entry.action)
+                logger.debug("File discovered but filtered. file=%s reason=%s", entry.relative_path, entry.action)
                 manifest.files_skipped += 1
                 _touch_group(manifest, entry.top_level_group).skipped += 1
                 with audit.stage(
@@ -399,7 +407,7 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
                 continue
 
             if entry.action == "unchanged" and not config.force_reupload and not config.force_reembed:
-                logger.info("File skipped unchanged by delta. file=%s", entry.relative_path)
+                logger.debug("File skipped unchanged by delta. file=%s", entry.relative_path)
                 manifest.files_unchanged += 1
                 manifest.files_skipped += 1
                 _touch_group(manifest, entry.top_level_group).skipped += 1
@@ -424,7 +432,7 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
                 manifest.files_changed += 1
 
             should_upload = config.force_reupload or entry.action in {"new", "changed"}
-            logger.info("Upload started. file=%s upload=%s", entry.relative_path, should_upload)
+            logger.debug("Upload started. file=%s upload=%s", entry.relative_path, should_upload)
             uploaded_document: str | None = None
             if should_upload:
                 with audit.stage(
@@ -447,14 +455,14 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
                     manifest.files_uploaded += 1
                     manifest.bytes_uploaded += entry.size_bytes
                     _touch_group(manifest, entry.top_level_group).uploaded += 1
-                    logger.info("Upload successful. file=%s doc=%s", entry.relative_path, uploaded_document)
+                    logger.debug("Upload successful. file=%s doc=%s", entry.relative_path, uploaded_document)
                 else:
                     uploaded_document = state.files.get(entry.relative_path).uploaded_document if entry.relative_path in state.files else None
 
                 if not uploaded_document:
                     raise RuntimeError("Kein Dokument-Identifier für Embedding vorhanden")
 
-                logger.info("Embedding started. file=%s workspace=%s", entry.relative_path, config.workspace)
+                logger.debug("Embedding started. file=%s workspace=%s", entry.relative_path, config.workspace)
                 with audit.stage(
                     run_id=run_context.run_id,
                     source_type="anythingllm_ingest",
@@ -474,7 +482,7 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
                     )
                 manifest.files_embedded += 1
                 _touch_group(manifest, entry.top_level_group).embedded += 1
-                logger.info("Embedding successful. file=%s", entry.relative_path)
+                logger.debug("Embedding successful. file=%s", entry.relative_path)
                 state.files[entry.relative_path] = AnythingLLMFileStateRecord(
                     sha256=entry.sha256,
                     size_bytes=entry.size_bytes,

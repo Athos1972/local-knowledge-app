@@ -14,13 +14,17 @@ RUN_CONFLUENCE=1
 RUN_SCRAPING=1
 RUN_INDEX=1
 RUN_AUDIT=1
-RUN_JIRA=0
+RUN_JIRA=1
 
-HAS_JIRA_STEP=0
-if [[ -f "$PROJECT_ROOT/scripts/run_transform_jira.py" ]]; then
-  HAS_JIRA_STEP=1
-  RUN_JIRA=1
+JIRA_STEP_SCRIPT="scripts/run_transform_jira.py"
+if [[ ! -f "$PROJECT_ROOT/$JIRA_STEP_SCRIPT" ]]; then
+  RUN_JIRA=0
 fi
+
+LOG_LEVEL_STDOUT="${LOG_LEVEL_STDOUT:-INFO}"
+LOG_LEVEL_FILE="${LOG_LEVEL_FILE:-DEBUG}"
+export LOG_LEVEL_STDOUT
+export LOG_LEVEL_FILE
 
 usage() {
   cat <<EOF_HELP
@@ -31,31 +35,16 @@ Options:
   --skip-anythingllm     Explicitly skip AnythingLLM ingest step.
   --only <step>          Run only one step.
   --skip-confluence      Skip Confluence transform step.
+  --skip-jira            Skip JIRA transform step.
   --skip-scraping        Skip scraping transform + mapping steps.
   --skip-index           Skip vector index build step.
   --skip-audit           Skip audit report step.
-EOF_HELP
 
-  if [[ "$HAS_JIRA_STEP" -eq 1 ]]; then
-    cat <<'EOF_HELP_JIRA'
-  --skip-jira            Skip JIRA transform step.
-EOF_HELP_JIRA
-  fi
-
-  cat <<'EOF_HELP_TAIL'
   -h, --help             Show this help.
 
 Available steps for --only:
   transform-confluence
-EOF_HELP_TAIL
-
-  if [[ "$HAS_JIRA_STEP" -eq 1 ]]; then
-    cat <<'EOF_HELP_STEPS_JIRA'
   transform-jira
-EOF_HELP_STEPS_JIRA
-  fi
-
-  cat <<'EOF_HELP_STEPS'
   transform-scraping
   map-scraping
   ingestion
@@ -68,7 +57,7 @@ Examples:
   ./pipeline.sh --with-anythingllm
   ./pipeline.sh --only transform-confluence
   ./pipeline.sh --only audit
-EOF_HELP_STEPS
+EOF_HELP
 }
 
 while [[ $# -gt 0 ]]; do
@@ -106,14 +95,8 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --skip-jira)
-      if [[ "$HAS_JIRA_STEP" -eq 1 ]]; then
-        RUN_JIRA=0
-        shift
-      else
-        echo "ERROR: unknown argument: --skip-jira" >&2
-        usage
-        exit 2
-      fi
+      RUN_JIRA=0
+      shift
       ;;
     -h|--help)
       usage
@@ -152,12 +135,8 @@ cd "$PROJECT_ROOT"
 step_exists() {
   local step="$1"
   case "$step" in
-    transform-confluence|transform-scraping|map-scraping|ingestion|index|audit|ingest-anythingllm)
+    transform-confluence|transform-jira|transform-scraping|map-scraping|ingestion|index|audit|ingest-anythingllm)
       return 0
-      ;;
-    transform-jira)
-      [[ "$HAS_JIRA_STEP" -eq 1 ]]
-      return
       ;;
     *)
       return 1
@@ -167,13 +146,15 @@ step_exists() {
 
 run_step() {
   local step="$1"
+  local stage_label="$2"
   shift
-  echo "[START] $step"
+  shift
+  echo "[START] $stage_label"
   if "$@"; then
-    echo "[OK]    $step"
+    echo "[OK]    $stage_label"
   else
     local rc=$?
-    echo "[FAIL]  $step (exit code $rc)"
+    echo "[FAIL]  $stage_label (exit code $rc)"
     exit "$rc"
   fi
 }
@@ -182,44 +163,48 @@ run_step_by_name() {
   local step="$1"
   case "$step" in
     transform-confluence)
-      run_step "$step" "$PYTHON_BIN" scripts/run_transform_confluence.py
+      run_step "$step" "Transform Confluence" "$PYTHON_BIN" scripts/run_transform_confluence.py
       ;;
     transform-jira)
-      run_step "$step" "$PYTHON_BIN" scripts/run_transform_jira.py
+      if [[ ! -f "$JIRA_STEP_SCRIPT" ]]; then
+        echo "[SKIP]  Transform JIRA (missing $JIRA_STEP_SCRIPT)"
+        return 0
+      fi
+      run_step "$step" "Transform JIRA" "$PYTHON_BIN" "$JIRA_STEP_SCRIPT"
       ;;
     transform-scraping)
       if [[ ! -d "exports/scraping" ]]; then
-        echo "[SKIP]  $step (missing exports/scraping)"
+        echo "[SKIP]  Transform Scraping (missing exports/scraping)"
         return 0
       fi
-      run_step "$step" "$PYTHON_BIN" scripts/run_transform_scraping_exports.py
+      run_step "$step" "Transform Scraping" "$PYTHON_BIN" scripts/run_transform_scraping_exports.py
       ;;
     map-scraping)
       if [[ ! -d "staging/transformed" ]]; then
-        echo "[SKIP]  $step (missing staging/transformed)"
+        echo "[SKIP]  Map Scraping (missing staging/transformed)"
         return 0
       fi
-      run_step "$step" "$PYTHON_BIN" scripts/run_map_transformed_to_domains.py
+      run_step "$step" "Map Scraping" "$PYTHON_BIN" scripts/run_map_transformed_to_domains.py
       ;;
     ingestion)
-      run_step "$step" "$PYTHON_BIN" scripts/run_ingestion.py
+      run_step "$step" "Ingestion" "$PYTHON_BIN" scripts/run_ingestion.py
       ;;
     index)
       if ! compgen -G "$HOME/local-knowledge-data/processed/chunks/*.jsonl" > /dev/null; then
-        echo "[SKIP]  $step (no chunk files found)"
+        echo "[SKIP]  Index (no chunk files found)"
         return 0
       fi
-      run_step "$step" "$PYTHON_BIN" scripts/build_vector_index.py
+      run_step "$step" "Index" "$PYTHON_BIN" scripts/build_vector_index.py
       ;;
     audit)
-      run_step "$step" "$PYTHON_BIN" scripts/audit_report.py
+      run_step "$step" "Audit" "$PYTHON_BIN" scripts/audit_report.py
       ;;
     ingest-anythingllm)
       if [[ -z "${ANYTHINGLLM_WORKSPACE:-}" ]]; then
-        echo "[SKIP]  $step (ANYTHINGLLM_WORKSPACE is not set)"
+        echo "[SKIP]  Ingest AnythingLLM (ANYTHINGLLM_WORKSPACE is not set)"
         return 0
       fi
-      run_step "$step" "$PYTHON_BIN" scripts/run_ingest_anythingllm.py
+      run_step "$step" "Ingest AnythingLLM" "$PYTHON_BIN" scripts/run_ingest_anythingllm.py
       ;;
     *)
       echo "ERROR: unsupported step: $step" >&2
@@ -231,10 +216,21 @@ run_step_by_name() {
 run_or_skip() {
   local enabled="$1"
   local step="$2"
+  local label="$step"
+  case "$step" in
+    transform-confluence) label="Transform Confluence" ;;
+    transform-jira) label="Transform JIRA" ;;
+    transform-scraping) label="Transform Scraping" ;;
+    map-scraping) label="Map Scraping" ;;
+    ingestion) label="Ingestion" ;;
+    index) label="Index" ;;
+    audit) label="Audit" ;;
+    ingest-anythingllm) label="Ingest AnythingLLM" ;;
+  esac
   if [[ "$enabled" -eq 1 ]]; then
     run_step_by_name "$step"
   else
-    echo "[SKIP]  $step"
+    echo "[SKIP]  $label"
   fi
 }
 
@@ -248,6 +244,8 @@ if [[ -n "$ONLY_STEP" ]]; then
   echo "=== Local Knowledge Pipeline ==="
   echo "Mode: only"
   echo "Only step: $ONLY_STEP"
+  echo "Stdout log level: $LOG_LEVEL_STDOUT"
+  echo "File log level: $LOG_LEVEL_FILE"
   echo "AnythingLLM enabled: $([[ "$WITH_ANYTHINGLLM" -eq 1 ]] && echo yes || echo no)"
   echo "Python: $PYTHON_BIN"
   echo "Log file: $LOG_FILE"
@@ -265,21 +263,20 @@ else
 fi
 
 echo "=== Local Knowledge Pipeline ==="
+echo "Mode: incremental"
 echo "Confluence: $([[ "$RUN_CONFLUENCE" -eq 1 ]] && echo on || echo off)"
-if [[ "$HAS_JIRA_STEP" -eq 1 ]]; then
-  echo "JIRA: $([[ "$RUN_JIRA" -eq 1 ]] && echo on || echo off)"
-fi
+echo "JIRA: $([[ "$RUN_JIRA" -eq 1 ]] && echo on || echo off)"
 echo "Scraping: $([[ "$RUN_SCRAPING" -eq 1 ]] && echo on || echo off)"
 echo "Index: $([[ "$RUN_INDEX" -eq 1 ]] && echo on || echo off)"
 echo "Audit: $([[ "$RUN_AUDIT" -eq 1 ]] && echo on || echo off)"
 echo "AnythingLLM: $([[ "$RUN_ANYTHINGLLM" -eq 1 ]] && echo on || echo off)"
+echo "Stdout log level: $LOG_LEVEL_STDOUT"
+echo "File log level: $LOG_LEVEL_FILE"
 echo "Python: $PYTHON_BIN"
 echo "Log file: $LOG_FILE"
 
 run_or_skip "$RUN_CONFLUENCE" "transform-confluence"
-if [[ "$HAS_JIRA_STEP" -eq 1 ]]; then
-  run_or_skip "$RUN_JIRA" "transform-jira"
-fi
+run_or_skip "$RUN_JIRA" "transform-jira"
 run_or_skip "$RUN_SCRAPING" "transform-scraping"
 run_or_skip "$RUN_SCRAPING" "map-scraping"
 run_step_by_name "ingestion"

@@ -141,7 +141,7 @@ class TableTransformer:
             return result.markdown
 
         transformed = re.sub(r"<table\b[^>]*>.*?</table>", replace_table, text, flags=re.DOTALL | re.IGNORECASE)
-        logger.info("Tabellenanalyse abgeschlossen: key_value_tables=%s", key_value_count)
+        logger.debug("Tabellenanalyse abgeschlossen: key_value_tables=%s", key_value_count)
         return transformed, warnings, key_value_properties, key_value_count
 
     def _render_table(self, table: ParsedTable) -> TableTransformResult:

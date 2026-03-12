@@ -131,7 +131,7 @@ def main() -> int:
                     status="skipped",
                 )
             )
-            logger.info("Seite übersprungen (unverändert): page_id=%s title=%s", page.page_id, page.title)
+            logger.debug("Seite übersprungen (unverändert): page_id=%s title=%s", page.page_id, page.title)
             continue
 
         try:
@@ -196,7 +196,7 @@ def main() -> int:
                     [w.code for w in transformed.transform_warnings],
                 )
             else:
-                logger.info("Seite verarbeitet: page_id=%s title=%s", page.page_id, page.title)
+                logger.debug("Seite verarbeitet: page_id=%s title=%s", page.page_id, page.title)
         except Exception as exc:  # noqa: BLE001
             with audit.stage(
                 run_id=run_context.run_id,
@@ -233,17 +233,19 @@ def main() -> int:
     state.save(state_path)
 
     logger.info(
-        "Confluence-Transform beendet. run_id=%s seen=%s processed=%s skipped=%s failed=%s duration=%.2fs (%s)",
+        "Confluence-Transform beendet. run_id=%s seen=%s processed=%s skipped=%s failed=%s warnings=%s outputs=%s duration=%.2fs (%s)",
         manifest.run_id,
         manifest.pages_seen,
         manifest.pages_processed,
         manifest.pages_skipped,
         manifest.pages_failed,
+        sum(record.warning_count for record in manifest.records),
+        manifest.pages_processed,
         manifest.run_duration,
         manifest.run_duration_human,
     )
-    logger.info("Transform-Manifest: %s", run_manifest_path)
-    logger.info("Transform-State: %s", state_path)
+    logger.debug("Transform-Manifest: %s", run_manifest_path)
+    logger.debug("Transform-State: %s", state_path)
     run_context.finish(status="finished" if manifest.pages_failed == 0 else "finished_with_errors")
     return 0 if manifest.pages_failed == 0 else 1
 

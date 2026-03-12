@@ -76,7 +76,7 @@ def main() -> int:
             and Path(state_record.output_file).exists()
         ):
             manifest.files_skipped += 1
-            logger.info("Datei übersprungen (unverändert): %s", input_file)
+            logger.debug("Datei übersprungen (unverändert): %s", input_file)
             manifest.records.append(
                 PublishRecord(
                     input_file=str(input_file),
@@ -120,7 +120,7 @@ def main() -> int:
                 manifest.files_unmapped += 1
                 logger.warning("Datei als unmapped publiziert: file=%s space=%s", input_file, result.space_key)
             else:
-                logger.info("Datei publiziert: file=%s output=%s", input_file, result.output_file)
+                logger.debug("Datei publiziert: file=%s output=%s", input_file, result.output_file)
             manifest.files_published += 1
 
         manifest.records.append(
@@ -164,8 +164,8 @@ def main() -> int:
         manifest.run_duration,
         manifest.run_duration_human,
     )
-    logger.info("Publish-Manifest: %s", run_manifest_path)
-    logger.info("Publish-State: %s", state_path)
+    logger.debug("Publish-Manifest: %s", run_manifest_path)
+    logger.debug("Publish-State: %s", state_path)
     return 0 if manifest.files_failed == 0 else 1
 
 

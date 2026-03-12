@@ -40,8 +40,13 @@ def _configure_once(run_id: str | None = None) -> None:
     if _CONFIGURED:
         return
 
-    log_level_name = str(AppConfig.get("logging", "level", default="INFO")).upper()
-    log_level = getattr(logging, log_level_name, logging.INFO)
+    fallback_level_name = AppConfig.get_str("LOG_LEVEL", "logging", "level", default="DEBUG").upper()
+    fallback_level = getattr(logging, fallback_level_name, logging.DEBUG)
+    stdout_level_name = AppConfig.get_str("LOG_LEVEL_STDOUT", "logging", "level_stdout", default="INFO").upper()
+    file_level_name = AppConfig.get_str("LOG_LEVEL_FILE", "logging", "level_file", default="DEBUG").upper()
+
+    stdout_level = getattr(logging, stdout_level_name, fallback_level)
+    file_level = getattr(logging, file_level_name, fallback_level)
 
     log_dir = AppConfig.get_path(None, "logging", "log_dir", default="logs")
     log_to_console = bool(AppConfig.get("logging", "log_to_console", default=True))
@@ -51,7 +56,7 @@ def _configure_once(run_id: str | None = None) -> None:
     )
 
     root_logger = logging.getLogger(_ROOT_LOGGER_NAME)
-    root_logger.setLevel(log_level)
+    root_logger.setLevel(min(stdout_level, file_level))
     root_logger.propagate = False
 
     if root_logger.handlers:
@@ -68,7 +73,7 @@ def _configure_once(run_id: str | None = None) -> None:
 
     if log_to_console:
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(log_level)
+        console_handler.setLevel(stdout_level)
         console_handler.setFormatter(formatter)
         console_handler.addFilter(run_filter)
         root_logger.addHandler(console_handler)
@@ -84,7 +89,7 @@ def _configure_once(run_id: str | None = None) -> None:
             file_name = f"{script_name}.log"
 
         file_handler = logging.FileHandler(log_dir / file_name, encoding="utf-8")
-        file_handler.setLevel(log_level)
+        file_handler.setLevel(file_level)
         file_handler.setFormatter(formatter)
         file_handler.addFilter(run_filter)
         root_logger.addHandler(file_handler)

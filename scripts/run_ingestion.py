@@ -139,7 +139,7 @@ def main() -> int:
                     status="skipped",
                 )
             )
-            logger.info(
+            logger.debug(
                 "Skipped unchanged doc_id=%s source_ref=%s",
                 source_doc.doc_id,
                 source_doc.source.source_ref,
@@ -206,7 +206,7 @@ def main() -> int:
                     status="processed",
                 )
             )
-            logger.info(
+            logger.debug(
                 "Ingested doc_id=%s title=%s chunks=%s",
                 normalized.doc_id,
                 normalized.title,
@@ -258,18 +258,19 @@ def main() -> int:
     state.save(state_path)
 
     logger.info(
-        "Ingestion completed. run_id=%s mode=%s seen=%s processed=%s skipped=%s failed=%s duration=%.2fs (%s)",
+        "Ingestion completed. run_id=%s mode=%s seen=%s processed=%s skipped=%s failed=%s chunks=%s duration=%.2fs (%s)",
         run_manifest.run_id,
         run_manifest.mode,
         run_manifest.documents_seen,
         run_manifest.documents_processed,
         run_manifest.documents_skipped,
         run_manifest.documents_failed,
+        sum(record.chunk_count for record in run_manifest.records if record.status == "processed"),
         run_manifest.run_duration,
         run_manifest.run_duration_human,
     )
-    logger.info("Manifest written: %s", run_manifest_path)
-    logger.info("Processing state written: %s", state_path)
+    logger.debug("Manifest written: %s", run_manifest_path)
+    logger.debug("Processing state written: %s", state_path)
     run_context.finish(status="finished" if run_manifest.documents_failed == 0 else "finished_with_errors")
     return 0 if run_manifest.documents_failed == 0 else 1
 

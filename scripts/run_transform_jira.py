@@ -126,7 +126,7 @@ def main() -> int:
                     status="skipped",
                 )
             )
-            logger.info("Issue übersprungen (unverändert): issue_key=%s", issue.issue_key)
+            logger.debug("Issue übersprungen (unverändert): issue_key=%s", issue.issue_key)
             continue
 
         try:
@@ -185,7 +185,7 @@ def main() -> int:
                     status="processed",
                 )
             )
-            logger.info("Issue verarbeitet: issue_key=%s title=%s", issue.issue_key, issue.summary)
+            logger.debug("Issue verarbeitet: issue_key=%s title=%s", issue.issue_key, issue.summary)
         except Exception as exc:  # noqa: BLE001
             with audit.stage(
                 run_id=run_context.run_id,
@@ -222,17 +222,19 @@ def main() -> int:
     state.save(state_path)
 
     logger.info(
-        "JIRA-Transform beendet. run_id=%s seen=%s processed=%s skipped=%s failed=%s duration=%.2fs (%s)",
+        "JIRA-Transform beendet. run_id=%s seen=%s processed=%s skipped=%s failed=%s warnings=%s outputs=%s duration=%.2fs (%s)",
         manifest.run_id,
         manifest.issues_seen,
         manifest.issues_processed,
         manifest.issues_skipped,
         manifest.issues_failed,
+        sum(record.warning_count for record in manifest.records),
+        manifest.issues_processed,
         manifest.run_duration,
         manifest.run_duration_human,
     )
-    logger.info("Transform-Manifest: %s", run_manifest_path)
-    logger.info("Transform-State: %s", state_path)
+    logger.debug("Transform-Manifest: %s", run_manifest_path)
+    logger.debug("Transform-State: %s", state_path)
     run_context.finish(status="finished" if manifest.issues_failed == 0 else "finished_with_errors")
     return 0 if manifest.issues_failed == 0 else 1
 

@@ -36,7 +36,7 @@ class ConfluenceTransformer:
         merged_page_properties = self._merge_page_properties(page.page_properties, extracted_properties)
 
         if key_value_count:
-            logger.info("Seite %s: %s Key-Value-Tabellen erkannt.", page.page_id, key_value_count)
+            logger.debug("Seite %s: %s Key-Value-Tabellen erkannt.", page.page_id, key_value_count)
 
         text = self.link_transformer.transform(text, source_url=page.source_url)
         text = self._convert_structure(text)

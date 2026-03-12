@@ -121,7 +121,7 @@ def run_transform(config: TransformRunConfig) -> TransformRunReport:
         )
 
         if config.dry_run:
-            LOGGER.info("[dry-run] Would write %s and %s", markdown_target, metadata_target)
+            LOGGER.debug("[dry-run] Would write %s and %s", markdown_target, metadata_target)
             status = "failed" if not result.success else "dry-run"
             if status == "failed":
                 report.failed += 1
@@ -157,7 +157,7 @@ def run_transform(config: TransformRunConfig) -> TransformRunReport:
             LOGGER.error("Failed to transform %s: %s", source_path, result.error)
         else:
             report.transformed += 1
-            LOGGER.info("Transformed %s -> %s", source_path, markdown_target)
+            LOGGER.debug("Transformed %s -> %s", source_path, markdown_target)
 
         report.records.append(
             TransformRunRecord(
@@ -176,6 +176,17 @@ def run_transform(config: TransformRunConfig) -> TransformRunReport:
     report.finished_at = _now_iso()
     report.run_duration = perf_counter() - started_perf
     report.run_duration_human = format_duration_human(report.run_duration)
+    LOGGER.info(
+        "Scraping-Transform beendet. run_id=%s seen=%s supported=%s transformed=%s skipped=%s failed=%s duration=%.2fs (%s)",
+        report.run_id,
+        report.total_seen,
+        report.total_supported,
+        report.transformed,
+        report.skipped,
+        report.failed,
+        report.run_duration,
+        report.run_duration_human,
+    )
     if not config.dry_run:
         _write_report(config.output_root, report)
     return report
