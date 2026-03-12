@@ -44,6 +44,10 @@ def main() -> int:
 
     input_root = Path(args.input_root).expanduser() if args.input_root else AppConfig.get_path(None, "jira_transform", "input_root", default=str(default_input_root))
     output_root = Path(args.output_root).expanduser() if args.output_root else AppConfig.get_path(None, "jira_transform", "output_root", default=str(default_output_root))
+
+    if not input_root.exists():
+        hint = "(CLI --input-root)" if args.input_root else "(config key [jira_transform].input_root in config/app.toml)"
+        raise FileNotFoundError(f"JIRA input root not found: {input_root} {hint}")
     manifests_dir = AppConfig.get_path(None, "jira_transform", "manifests_dir", default=str(data_root / "system" / "jira_transform"))
 
     mode = "full" if args.full_refresh else "incremental"
@@ -96,7 +100,8 @@ def main() -> int:
         ) as load_evt:
             load_evt.event.output_count = len(issue.description)
 
-        source_checksum = stable_hash("|".join([issue.issue_key, issue.summary, issue.description, issue.updated_at or "", ",".join(issue.labels)]))
+        attachment_signature = ",".join(sorted(issue.attachment_paths))
+        source_checksum = stable_hash("|".join([issue.issue_key, issue.summary, issue.description, issue.updated_at or "", ",".join(issue.labels), attachment_signature]))
         old = state.issues.get(issue.issue_key)
 
         output_path = writer.build_output_path(issue.project_key, issue.issue_key, issue.summary)

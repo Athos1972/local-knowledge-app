@@ -20,6 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=None, help="Maximum number of supported files to process.")
     parser.add_argument("--force", action="store_true", help="Force rewrite even when changed-only would skip.")
     parser.add_argument("--changed-only", action="store_true", help="Only process files newer than existing artifacts.")
+    parser.add_argument("--fail-on-unsupported", action="store_true", help="Fail if unsupported file extensions are encountered.")
     return parser
 
 
@@ -30,13 +31,21 @@ def main() -> None:
     input_root_default = AppConfig.get_path(None, "scraping_transform", "input_root", default="exports/scraping")
     output_root_default = AppConfig.get_path(None, "scraping_transform", "output_root", default="staging/transformed")
 
+    input_root = args.input_root.expanduser() if args.input_root else input_root_default
+    output_root = args.output_root.expanduser() if args.output_root else output_root_default
+
+    if not input_root.exists():
+        hint = "(CLI --input-root)" if args.input_root else "(config key [scraping_transform].input_root in config/app.toml)"
+        raise FileNotFoundError(f"Scraping input root not found: {input_root} {hint}")
+
     config = TransformRunConfig(
-        input_root=(args.input_root.expanduser() if args.input_root else input_root_default),
-        output_root=(args.output_root.expanduser() if args.output_root else output_root_default),
+        input_root=input_root,
+        output_root=output_root,
         dry_run=args.dry_run,
         limit=args.limit,
         force=args.force,
         changed_only=args.changed_only,
+        fail_on_unsupported=args.fail_on_unsupported,
     )
 
     report = run_transform(config)
@@ -47,6 +56,7 @@ def main() -> None:
     print(f"- Transformed: {report.transformed}")
     print(f"- Skipped: {report.skipped}")
     print(f"- Failed: {report.failed}")
+    print(f"- Unsupported: {report.unsupported}")
     print(f"- Duration: {report.run_duration:.2f}s ({report.run_duration_human})")
 
 

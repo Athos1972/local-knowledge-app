@@ -28,6 +28,7 @@ class JiraRawIssue:
     components: list[str] = field(default_factory=list)
     fix_versions: list[str] = field(default_factory=list)
     attachments: list[dict[str, Any]] = field(default_factory=list)
+    attachment_paths: list[str] = field(default_factory=list)
     raw_metadata: dict[str, Any] = field(default_factory=dict)
 
 

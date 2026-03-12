@@ -24,6 +24,7 @@ class TransformRunConfig:
     limit: int | None = None
     force: bool = False
     changed_only: bool = False
+    fail_on_unsupported: bool = False
 
 
 @dataclass(slots=True)
@@ -50,6 +51,7 @@ class TransformRunReport:
     transformed: int = 0
     skipped: int = 0
     failed: int = 0
+    unsupported: int = 0
     records: list[TransformRunRecord] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,12 +78,26 @@ def run_transform(config: TransformRunConfig) -> TransformRunReport:
             break
 
         transformer = router.resolve(source_path)
-        if transformer is None:
-            continue
-        report.total_supported += 1
-
         rel_path = source_path.relative_to(config.input_root)
         markdown_target, metadata_target = _target_paths(config.output_root, rel_path)
+
+        if transformer is None:
+            report.skipped += 1
+            report.unsupported += 1
+            warning = f"unsupported extension: {source_path.suffix.lower() or '<none>'}"
+            report.records.append(
+                TransformRunRecord(
+                    source_path=str(source_path),
+                    relative_source_path=rel_path.as_posix(),
+                    markdown_path=str(markdown_target),
+                    metadata_path=str(metadata_target),
+                    transformer=None,
+                    status="skipped",
+                    warnings=[warning],
+                )
+            )
+            continue
+        report.total_supported += 1
 
         if config.changed_only and not config.force and _is_up_to_date(source_path, markdown_target, metadata_target):
             report.skipped += 1
@@ -172,6 +188,29 @@ def run_transform(config: TransformRunConfig) -> TransformRunReport:
             )
         )
         processed += 1
+
+
+    unsupported_by_extension: dict[str, int] = {}
+    for record in report.records:
+        if record.status != "skipped" or not record.warnings:
+            continue
+        warning = record.warnings[0]
+        if not warning.startswith("unsupported extension:"):
+            continue
+        extension = warning.split(":", 1)[1].strip()
+        unsupported_by_extension[extension] = unsupported_by_extension.get(extension, 0) + 1
+
+    if unsupported_by_extension:
+        summary = ", ".join(
+            f"{extension}={count}" for extension, count in sorted(unsupported_by_extension.items(), key=lambda item: (-item[1], item[0]))[:10]
+        )
+        LOGGER.warning("Skipped unsupported files: %s", summary)
+
+    if config.fail_on_unsupported and report.unsupported > 0:
+        raise RuntimeError(
+            f"Unsupported files encountered: {report.unsupported}. "
+            "Re-run without --fail-on-unsupported to ignore them."
+        )
 
     report.finished_at = _now_iso()
     report.run_duration = perf_counter() - started_perf

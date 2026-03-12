@@ -56,6 +56,7 @@ class JiraExportLoader:
 
         description = self._extract_description(payload, fields, issue_dir)
         attachments = self._normalize_attachments(self._pick(payload, ["attachments", "fields.attachment"], default=[]))
+        attachment_paths = self._resolve_attachment_paths(attachments, issue_dir)
 
         issue_type = self._optional_str(self._pick(payload, ["issue_type", "fields.issuetype.name"]))
         status = self._optional_str(self._pick(payload, ["status", "fields.status.name"]))
@@ -89,6 +90,7 @@ class JiraExportLoader:
             components=components,
             fix_versions=fix_versions,
             attachments=attachments,
+            attachment_paths=attachment_paths,
             raw_metadata=payload,
         )
 
@@ -146,6 +148,45 @@ class JiraExportLoader:
                 if isinstance(name, str) and name.strip():
                     result.append(name.strip())
         return result
+
+
+    def _resolve_attachment_paths(self, attachments: list[dict[str, Any]], issue_dir: Path) -> list[str]:
+        resolved: list[str] = []
+        for item in attachments:
+            candidates: list[Path] = []
+
+            for key in ("local_path", "localPath", "path", "file_path", "filePath", "filepath", "export_path", "absolute_path"):
+                raw = item.get(key)
+                if isinstance(raw, str) and raw.strip():
+                    candidates.append(Path(raw.strip()).expanduser())
+
+            file_name = str(item.get("name") or item.get("filename") or item.get("title") or "").strip()
+            if file_name:
+                candidates.extend(
+                    [
+                        issue_dir / file_name,
+                        issue_dir / "attachments" / file_name,
+                        issue_dir / "attachment" / file_name,
+                        issue_dir / "files" / file_name,
+                        issue_dir.parent / "attachments" / file_name,
+                    ]
+                )
+
+            found: Path | None = None
+            for candidate in candidates:
+                absolute = candidate if candidate.is_absolute() else (issue_dir / candidate).resolve()
+                if absolute.exists() and absolute.is_file():
+                    found = absolute
+                    break
+
+            if found is None:
+                continue
+
+            normalized = str(found.resolve())
+            item.setdefault("local_path", normalized)
+            if normalized not in resolved:
+                resolved.append(normalized)
+        return resolved
 
     @staticmethod
     def _normalize_attachments(value: Any) -> list[dict[str, Any]]:

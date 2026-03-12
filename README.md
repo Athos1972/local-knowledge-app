@@ -235,6 +235,7 @@ Optionen:
 - `--limit N`: max. Anzahl verarbeiteter unterstützter Dateien
 - `--force`: Artefakte auch bei bestehendem Stand neu schreiben
 - `--changed-only`: nur transformieren, wenn Quelle neuer als Zielartefakte ist
+- `--fail-on-unsupported`: Run mit Fehler beenden, wenn nicht unterstützte Dateiendungen gefunden werden
 
 Wenn `--input-root`/`--output-root` nicht gesetzt sind, werden Defaults aus `config/app.toml` unter `[scraping_transform]` verwendet (Fallback: `exports/scraping` und `staging/transformed`).
 

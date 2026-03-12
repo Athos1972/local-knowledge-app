@@ -173,15 +173,20 @@ run_step_by_name() {
       run_step "$step" "Transform JIRA" "$PYTHON_BIN" "$JIRA_STEP_SCRIPT"
       ;;
     transform-scraping)
-      if [[ ! -d "exports/scraping" ]]; then
-        echo "[SKIP]  Transform Scraping (missing exports/scraping)"
-        return 0
+      local scraping_input_root
+      scraping_input_root="$($PYTHON_BIN -c "from common.config import AppConfig; from pathlib import Path; p=AppConfig.get_path(None, 'scraping_transform', 'input_root', default='exports/scraping'); print(Path(p).resolve())")"
+      if [[ ! -d "$scraping_input_root" ]]; then
+        echo "[FAIL]  Transform Scraping (scraping input root missing: $scraping_input_root)"
+        echo "        Hinweis: setze [scraping_transform].input_root in config/app.toml oder nutze --input-root im Script."
+        return 1
       fi
       run_step "$step" "Transform Scraping" "$PYTHON_BIN" scripts/run_transform_scraping_exports.py
       ;;
     map-scraping)
-      if [[ ! -d "staging/transformed" ]]; then
-        echo "[SKIP]  Map Scraping (missing staging/transformed)"
+      local scraping_output_root
+      scraping_output_root="$($PYTHON_BIN -c "from common.config import AppConfig; from pathlib import Path; p=AppConfig.get_path(None, 'scraping_transform', 'output_root', default='staging/transformed'); print(Path(p).resolve())")"
+      if [[ ! -d "$scraping_output_root" ]]; then
+        echo "[SKIP]  Map Scraping (missing transformed root: $scraping_output_root)"
         return 0
       fi
       run_step "$step" "Map Scraping" "$PYTHON_BIN" scripts/run_map_transformed_to_domains.py
