@@ -52,11 +52,13 @@ def test_file_filter_and_delta_decision(tmp_path: Path) -> None:
 
     plan = build_delta_plan(ingest, {".md", ".txt", ".json"}, 1024 * 1024, state)
     actions = {entry.relative_path: entry.action for entry in plan}
+    reasons = {entry.relative_path: entry.reason_code for entry in plan}
 
     assert actions["confluence/new.md"] == "new"
     assert actions["jira/changed.txt"] == "changed"
     assert actions["jira/same.json"] == "unchanged"
     assert actions["jira/skip.pdf"] == "filtered"
+    assert reasons["jira/skip.pdf"] == "unsupported_file_extension"
 
 
 def test_grouping_top_level_folder() -> None:

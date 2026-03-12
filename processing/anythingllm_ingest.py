@@ -393,7 +393,7 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
                     document_title=entry.absolute_path.name,
                     extra_json={"is_dirty": None},
                 ) as filter_evt:
-                    reason_code = entry.reason_code or (ReasonCode.FILE_TOO_LARGE if entry.action == "too_large" else ReasonCode.FILTERED_BY_RULE)
+                    reason_code = entry.reason_code or _fallback_reason_code(entry.action)
                     filter_evt.skipped(reason_code, entry.reason_detail or f"Filtered action={entry.action}")
                 manifest.records.append(_record(entry, status="skipped", reason=entry.action))
                 continue
@@ -590,6 +590,16 @@ def _classify_filtered_reason(path: Path) -> str:
     if lower_name in {"readme.md", "thumbs.db", ".ds_store"}:
         return ReasonCode.IGNORE_SYSTEM_FILE
     return ReasonCode.UNSUPPORTED_FILE_EXTENSION
+
+
+def _fallback_reason_code(action: str) -> str:
+    if action == "too_large":
+        return ReasonCode.FILE_TOO_LARGE
+    if action == "unchanged":
+        return ReasonCode.UNCHANGED_INCREMENTAL
+    if action == "filtered":
+        return ReasonCode.FILTERED_BY_RULE
+    return f"custom_filter_{action}"
 
 
 def infer_top_level_group(relative_path: str) -> str:

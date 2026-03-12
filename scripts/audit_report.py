@@ -34,6 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--markdown-out", default=None)
     parser.add_argument("--csv-out", default=None)
     parser.add_argument("--drilldown", action="store_true", help="Detaillierten Dokument-Drilldown exportieren")
+    parser.add_argument("--only-problematic", action="store_true", help="Im Drilldown nur problematische Dokumente exportieren")
     parser.add_argument("--output", default=None, help="Ausgabepfad für Drilldown-CSV/JSON")
     parser.add_argument("--output-format", "--drilldown-format", dest="output_format", choices=["csv", "json"], default=None, help="Format für Drilldown-Ausgabe")
     return parser.parse_args()
@@ -50,6 +51,7 @@ def main() -> int:
         run_id=args.run_id,
         source_type=args.source_type,
         source_instance=args.source_instance,
+        only_problematic=args.only_problematic,
     )
     report = service.build_report(filters)
 

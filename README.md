@@ -297,6 +297,7 @@ python scripts/audit_report.py --date 2026-03-11 --source-type confluence
 python scripts/audit_report.py --run-id 20260311_194512_confluence_full --markdown-out reports/audit_today.md --csv-out reports/problem_documents.csv
 python scripts/audit_report.py --run-id 20260311_194512_confluence_full --drilldown --drilldown-format json --output reports/audit/audit_drilldown.json
 python scripts/audit_report.py --run-id 20260311_194512_confluence_full --format csv --output reports/audit/audit_drilldown.csv
+python scripts/audit_report.py --run-id 20260311_194512_confluence_full --drilldown --only-problematic --format json --output reports/audit/audit_drilldown_problematic.json
 ```
 
 ### Funnel lesen
@@ -310,6 +311,8 @@ python scripts/audit_report.py --run-id 20260311_194512_confluence_full --format
 - `chunked_docs`: Dokumente mit erfolgreichem Chunk-Stage-Event
 - `chunks_created`: Summe erzeugter Chunks
 - `embedded_chunks` / `indexed_chunks`: verarbeitete Chunk-Mengen im Index-Lauf
+- `expected_dropoff = loaded - candidate_for_transform` (typisch erwartbar durch Incremental-Skips wie `unchanged_incremental`)
+- `problematic_dropoff = candidate_for_transform - transformed_ok` (fachlich/technisch relevanter Verlust)
 
 Zusätzlich zeigt der Report Quoten und Semantik (run-typ-spezifisch):
 
@@ -317,7 +320,7 @@ Zusätzlich zeigt der Report Quoten und Semantik (run-typ-spezifisch):
 - `index`-Run: nur `Index-Quote` (falls `chunks_created > 0`, sonst `n/a`)
 - `ingest`-Run: keine irreführende Transform-Quote (`n/a`)
 - `mixed`/`chunk`: Quoten nur wenn Zähler/Nenner fachlich passen
-- Größter Drop-Off mit Kontext (`loaded -> candidate_for_transform -> transformed_ok`), damit hohe `unchanged_skipped` nicht als Verlust fehlinterpretiert werden.
+- Größter **erwarteter** Drop-Off (`loaded -> candidate_for_transform`) und größter **problematischer** Drop-Off (`candidate_for_transform -> transformed_ok`) separat.
 
 ### Drilldown für problematische Runs
 
@@ -329,6 +332,7 @@ Mit `--drilldown` wird eine Detailansicht **pro Dokument** als CSV oder JSON exp
 - `changed_flag`, `is_dirty`, `unchanged_flag`
 - `raw_text_length`, `transformed_text_length`, `chunk_count`
 - `warning_flags`, `source_path`, optional `file_path`/`page_id`/`content_id`
+- `is_problematic` (True bei relevanten Warn-/Skip-/Error-Fällen, False bei erwartbaren Incremental-Skips)
 
 Beispiel (JSON):
 
@@ -367,8 +371,12 @@ Wichtige Filter-/Skip-Codes sind jetzt granular statt generisch `filtered_by_rul
 - `unchanged_incremental` (zählt zu `unchanged_skipped`, nicht zu `filtered_skipped`)
 - `empty_after_transform`, `no_chunks_created`, `transform_exception`
 
+Historische Runs mit altem Sammelcode `filtered_by_rule` bleiben lesbar und weiterhin auswertbar.
+Neue Runs liefern jedoch granularere Ursachen (je Filterregel eigener `reason_code`).
+
 Empfehlung bei neuen Regeln:
 
 1. Pro Regel **einen stabilen `reason_code`** vergeben.
 2. Optional Detailkontext in `message`/`extra_json` speichern.
 3. Neue Codes zentral in `processing/audit/models.py` ergänzen, damit Reports aggregierbar bleiben.
+4. Für spezifische Projektregeln bei Bedarf ein stabiles Präfix wie `custom_filter_<rule_name>` verwenden.

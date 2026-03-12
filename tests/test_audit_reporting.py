@@ -26,6 +26,8 @@ def test_reporting_aggregates_stage_status_and_reasons(tmp_path: Path) -> None:
     assert report["stage_stats"]["chunk"]["skipped"] == 1
     assert report["funnel"]["run-1"]["unchanged_skipped"] == 1
     assert report["funnel"]["run-1"]["transformed_ok"] == 1
+    assert report["funnel"]["run-1"]["expected_dropoff"] == 1
+    assert report["funnel"]["run-1"]["problematic_dropoff"] == 0
     assert report["reason_codes"][0]["reason_code"] in {"unsupported_macro", "no_chunks_created", "unchanged_incremental"}
     assert report["drop_off"][0]["drop"] >= 0
 
@@ -69,6 +71,7 @@ def test_drilldown_contains_reason_and_lengths(tmp_path: Path) -> None:
     assert rows[0]["reason_code"] == "transform_exception"
     assert rows[0]["raw_text_length"] == 100
     assert rows[0]["changed_flag"] is True
+    assert rows[0]["is_problematic"] is True
 
 
 def test_reporting_classifies_run_type_and_hides_invalid_quotes(tmp_path: Path) -> None:
@@ -98,3 +101,21 @@ def test_drilldown_returns_one_row_per_document(tmp_path: Path) -> None:
     assert rows[0]["document_id"] == "page-1"
     assert rows[0]["unchanged_flag"] is True
     assert rows[0]["stage"] == "filter"
+    assert rows[0]["is_problematic"] is False
+
+
+def test_drilldown_only_problematic_filters_out_unchanged(tmp_path: Path) -> None:
+    repository = AuditRepository(tmp_path / "audit.sqlite")
+    run = PipelineRun(run_id="run-5", started_at=datetime(2026, 3, 11, 15, 0, tzinfo=UTC).isoformat(), source_type="confluence", mode="delta")
+    repository.upsert_run(run)
+    repository.insert_event(AuditEvent(run_id="run-5", source_type="confluence", source_instance="wstw", stage="load", status="ok", document_id="page-1", document_title="Page 1"))
+    repository.insert_event(AuditEvent(run_id="run-5", source_type="confluence", source_instance="wstw", stage="filter", status="skipped", reason_code="unchanged_incremental", document_id="page-1", document_title="Page 1", extra_json={"changed_flag": False, "is_dirty": False}))
+    repository.insert_event(AuditEvent(run_id="run-5", source_type="confluence", source_instance="wstw", stage="load", status="ok", document_id="page-2", document_title="Page 2"))
+    repository.insert_event(AuditEvent(run_id="run-5", source_type="confluence", source_instance="wstw", stage="transform", status="error", reason_code="transform_exception", document_id="page-2", document_title="Page 2"))
+
+    rows = AuditReportService(repository).build_drilldown(
+        ReportFilters(report_date=datetime(2026, 3, 11, tzinfo=UTC).date(), run_id="run-5", only_problematic=True)
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["document_id"] == "page-2"
