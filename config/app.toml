@@ -31,3 +31,21 @@ embed_model = "nomic-embed-text"
 
 [embeddings]
 provider = "ollama"
+
+[anythingllm]
+base_url = "http://localhost:3001"
+workspace = ""
+document_folder = "custom-documents"
+timeout_seconds = 30
+max_retries = 3
+retry_backoff_seconds = 1.0
+api_key = ""
+
+[anythingllm.api]
+upload_path = "/api/v1/document/upload"
+workspace_attach_path_template = "/api/v1/workspace/{workspace}/update-embeddings"
+
+[anythingllm_ingest]
+ingest_dir = "~/local-knowledge-data/ingest"
+allowed_extensions = ".md,.txt,.json,.html,.csv"
+max_file_size_mb = 20
