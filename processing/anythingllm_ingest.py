@@ -137,6 +137,7 @@ class AnythingLLMIngestConfig:
     force_reembed: bool = False
     run_id: str | None = None
     source_instance: str = "anythingllm"
+    workspace_attach_path_templates: list[str] = field(default_factory=list)
 
     @property
     def mode(self) -> str:
@@ -173,6 +174,24 @@ class AnythingLLMIngestConfig:
 
         max_file_size_mb = int(AppConfig.get_str("MAX_FILE_SIZE_MB", "anythingllm_ingest", "max_file_size_mb", default="20"))
 
+        path_template = AppConfig.get_str(
+            "ANYTHINGLLM_WORKSPACE_ATTACH_PATH_TEMPLATE",
+            "anythingllm",
+            "api",
+            "workspace_attach_path_template",
+            default="/api/v1/workspace/{workspace}/update-embeddings",
+        )
+        path_templates_raw = AppConfig.get_str(
+            "ANYTHINGLLM_WORKSPACE_ATTACH_PATH_TEMPLATES",
+            "anythingllm",
+            "api",
+            "workspace_attach_path_templates",
+            default=path_template,
+        )
+        path_templates = [part.strip() for part in path_templates_raw.split(",") if part.strip()]
+        if path_template not in path_templates:
+            path_templates.insert(0, path_template)
+
         return cls(
             ingest_dir=(ingest_dir or Path(configured_ingest)).expanduser().resolve(),
             data_root=data_root,
@@ -197,13 +216,8 @@ class AnythingLLMIngestConfig:
                 "upload_folder_field",
                 default="folder",
             ),
-            workspace_attach_path_template=AppConfig.get_str(
-                "ANYTHINGLLM_WORKSPACE_ATTACH_PATH_TEMPLATE",
-                "anythingllm",
-                "api",
-                "workspace_attach_path_template",
-                default="/api/v1/workspace/{workspace}/update-embeddings",
-            ),
+            workspace_attach_path_template=path_template,
+            workspace_attach_path_templates=path_templates,
             workspace_attach_documents_key=AppConfig.get_str(
                 "ANYTHINGLLM_WORKSPACE_ATTACH_DOCUMENTS_KEY",
                 "anythingllm",
@@ -265,7 +279,11 @@ class AnythingLLMClient:
         return location
 
     def embed_in_workspace(self, *, workspace: str, document_location: str, force_reembed: bool) -> None:
-        path = self.config.workspace_attach_path_template.format(workspace=workspace)
+        path_candidates = _build_embed_path_candidates(
+            workspace=workspace,
+            preferred_path_template=self.config.workspace_attach_path_template,
+            configured_templates=self.config.workspace_attach_path_templates,
+        )
         payload_candidates = _build_embed_payload_candidates(
             document_location=document_location,
             force_reembed=force_reembed,
@@ -273,31 +291,33 @@ class AnythingLLMClient:
             preferred_force_key=self.config.workspace_attach_force_key,
         )
         last_error: AnythingLLMRequestError | None = None
-        for payload in payload_candidates:
-            try:
-                self._request(
-                    path,
-                    method="POST",
-                    json_body=payload,
-                    request_context={"embed_payload": json.dumps(payload, ensure_ascii=False)},
-                )
-                return
-            except AnythingLLMRequestError as exc:
-                last_error = exc
-                # Bei 400/422 versuchen wir alternative Payload-Schemata für API-Versionen.
-                if exc.status_code in {400, 422}:
-                    continue
-                raise
+        for path in path_candidates:
+            for payload in payload_candidates:
+                try:
+                    self._request(
+                        path,
+                        method="POST",
+                        json_body=payload,
+                        request_context={"embed_payload": json.dumps(payload, ensure_ascii=False)},
+                    )
+                    return
+                except AnythingLLMRequestError as exc:
+                    last_error = exc
+                    # Bei 400/404/422 versuchen wir alternative Pfad-/Payload-Schemata für API-Versionen.
+                    if exc.status_code in {400, 404, 422}:
+                        continue
+                    raise
 
-        tried = ", ".join(json.dumps(item, ensure_ascii=False) for item in payload_candidates)
+        tried_paths = ", ".join(path_candidates)
+        tried_payloads = ", ".join(json.dumps(item, ensure_ascii=False) for item in payload_candidates)
         if last_error is not None:
             raise AnythingLLMRequestError(
-                f"Workspace-Embedding fehlgeschlagen nach Payload-Varianten. tried=[{tried}]",
+                f"Workspace-Embedding fehlgeschlagen nach Pfad-/Payload-Varianten. paths=[{tried_paths}] payloads=[{tried_payloads}]",
                 status_code=last_error.status_code,
                 response_text=last_error.response_text,
             ) from last_error
         raise AnythingLLMRequestError(
-            f"Workspace-Embedding fehlgeschlagen ohne API-Response. tried=[{tried}]"
+            f"Workspace-Embedding fehlgeschlagen ohne API-Response. paths=[{tried_paths}] payloads=[{tried_payloads}]"
         )
 
     def _request(
@@ -705,11 +725,14 @@ def _build_embed_payload_candidates(
     for doc_key in doc_keys:
         base = {doc_key: [document_location]}
         candidates.append(dict(base))
+        # Einige Versionen erwarten deletes explizit als leeres Array.
+        candidates.append({**base, "deletes": []})
         if force_reembed:
             for force_key in force_keys:
                 payload = dict(base)
                 payload[force_key] = True
                 candidates.append(payload)
+                candidates.append({**payload, "deletes": []})
 
     deduped: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -720,3 +743,17 @@ def _build_embed_payload_candidates(
         seen.add(key)
         deduped.append(candidate)
     return deduped
+
+
+def _build_embed_path_candidates(
+    *,
+    workspace: str,
+    preferred_path_template: str,
+    configured_templates: list[str],
+) -> list[str]:
+    templates: list[str] = []
+    for template in [preferred_path_template, *configured_templates, "/api/v1/workspace/{workspace}/update-embeddings", "/api/workspace/{workspace}/update-embeddings"]:
+        normalized = template.strip()
+        if normalized and normalized not in templates:
+            templates.append(normalized)
+    return [template.format(workspace=workspace) for template in templates]

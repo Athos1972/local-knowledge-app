@@ -44,6 +44,7 @@ api_key = ""
 [anythingllm.api]
 upload_path = "/api/v1/document/upload"
 workspace_attach_path_template = "/api/v1/workspace/{workspace}/update-embeddings"
+workspace_attach_path_templates = "/api/v1/workspace/{workspace}/update-embeddings,/api/workspace/{workspace}/update-embeddings"
 upload_file_field = "file"
 upload_folder_field = "folder"
 workspace_attach_documents_key = "adds"
