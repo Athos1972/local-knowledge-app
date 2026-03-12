@@ -43,6 +43,7 @@ def main() -> int:
     print(f"- embedded: {manifest.files_embedded}")
     print(f"- skipped: {manifest.files_skipped}")
     print(f"- failed: {manifest.files_failed}")
+    print(f"- duration: {manifest.run_duration:.2f}s ({manifest.run_duration_human})")
     return exit_code
 
 

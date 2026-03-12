@@ -7,8 +7,10 @@ import json
 from pathlib import Path
 from typing import Any
 import uuid
+from time import perf_counter
 
 from common.logging_setup import get_logger
+from common.time_utils import format_duration_human
 from local_knowledge_app.transformers.router import TransformRouter
 
 LOGGER = get_logger("scraping_transform")
@@ -41,6 +43,8 @@ class TransformRunReport:
     run_id: str
     started_at: str
     finished_at: str | None = None
+    run_duration: float = 0.0
+    run_duration_human: str = "0s"
     total_seen: int = 0
     total_supported: int = 0
     transformed: int = 0
@@ -57,6 +61,7 @@ class TransformRunReport:
 def run_transform(config: TransformRunConfig) -> TransformRunReport:
     run_id = f"scrape-transform-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}"
     report = TransformRunReport(run_id=run_id, started_at=_now_iso())
+    started_perf = perf_counter()
     router = TransformRouter()
 
     if not config.input_root.exists():
@@ -169,6 +174,8 @@ def run_transform(config: TransformRunConfig) -> TransformRunReport:
         processed += 1
 
     report.finished_at = _now_iso()
+    report.run_duration = perf_counter() - started_perf
+    report.run_duration_human = format_duration_human(report.run_duration)
     if not config.dry_run:
         _write_report(config.output_root, report)
     return report

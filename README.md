@@ -175,6 +175,7 @@ Defaults/strukturierte Konfiguration siehe `config/app.toml` (`[anythingllm]`, `
 - Nur neue oder geänderte Dateien werden standardmäßig hochgeladen
 - Unveränderte Dateien werden mit Audit-Reason `unchanged_source` übersprungen
 - Dry-Run führt keinen API-Call aus, erzeugt aber vollständige Planung/Stats/Manifest
+- Run-Dauer wird numerisch (`run_duration`) und zusätzlich human-readable (`run_duration_human`) im Manifest ausgegeben.
 - Embed-Payload ist fix: `{"adds": ["<location-aus-upload>"]}` (kein rekonstruiertes Pathing).
 
 Run-Artefakte:
@@ -234,6 +235,8 @@ Optionen:
 - `--limit N`: max. Anzahl verarbeiteter unterstützter Dateien
 - `--force`: Artefakte auch bei bestehendem Stand neu schreiben
 - `--changed-only`: nur transformieren, wenn Quelle neuer als Zielartefakte ist
+
+Wenn `--input-root`/`--output-root` nicht gesetzt sind, werden Defaults aus `config/app.toml` unter `[scraping_transform]` verwendet (Fallback: `exports/scraping` und `staging/transformed`).
 
 Unterstützte MVP-Formate (MarkItDown-Adapter):
 - `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.xls`

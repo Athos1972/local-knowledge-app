@@ -15,11 +15,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
+from time import perf_counter
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from common.logging_setup import AppLogger
+from common.time_utils import format_duration_human
 from processing.audit import AuditStage, ReasonCode, build_audit_components
 from processing.file_writer import FileWriter
 from processing.manifest import ProcessedDocumentRecord, RunManifest, generate_run_id
@@ -49,6 +51,7 @@ def main() -> int:
     """Führt die lokale Markdown-Ingestion inkl. Manifest/Incremental-Logik aus."""
     args = parse_args()
     logger = AppLogger.get_logger()
+    started_perf = perf_counter()
 
     data_root = Path.home() / "local-knowledge-data"
     domains_root = data_root / "domains"
@@ -241,6 +244,8 @@ def main() -> int:
             )
 
     run_manifest.finished_at = utc_now_iso()
+    run_manifest.run_duration = perf_counter() - started_perf
+    run_manifest.run_duration_human = format_duration_human(run_manifest.run_duration)
 
     manifests_dir.mkdir(parents=True, exist_ok=True)
     run_manifest_path = manifests_dir / f"run_{run_manifest.run_id}.json"
@@ -251,13 +256,15 @@ def main() -> int:
     state.save(state_path)
 
     logger.info(
-        "Ingestion completed. run_id=%s mode=%s seen=%s processed=%s skipped=%s failed=%s",
+        "Ingestion completed. run_id=%s mode=%s seen=%s processed=%s skipped=%s failed=%s duration=%.2fs (%s)",
         run_manifest.run_id,
         run_manifest.mode,
         run_manifest.documents_seen,
         run_manifest.documents_processed,
         run_manifest.documents_skipped,
         run_manifest.documents_failed,
+        run_manifest.run_duration,
+        run_manifest.run_duration_human,
     )
     logger.info("Manifest written: %s", run_manifest_path)
     logger.info("Processing state written: %s", state_path)

@@ -12,6 +12,7 @@ from processing.anythingllm_ingest import (
     AnythingLLMClient,
     _build_multipart_upload_request,
     _is_non_transient_api_drift_error,
+    format_duration_human,
     build_delta_plan,
     infer_top_level_group,
     is_allowed_extension,
@@ -85,11 +86,19 @@ def test_manifest_stats_serialization() -> None:
         bytes_total=100,
         bytes_uploaded=80,
         run_duration=1.23,
+        run_duration_human="1s",
     )
     payload = json.loads(manifest.to_json())
     assert payload["files_scanned"] == 3
     assert payload["files_uploaded"] == 2
     assert payload["bytes_uploaded"] == 80
+    assert payload["run_duration_human"] == "1s"
+
+
+def test_format_duration_human() -> None:
+    assert format_duration_human(0.4) == "0s"
+    assert format_duration_human(61.2) == "1m 1s"
+    assert format_duration_human(3661) == "1h 1m 1s"
 
 
 def test_multipart_builder_uses_configured_field_names(tmp_path: Path) -> None:
@@ -207,6 +216,6 @@ def test_embed_in_workspace_uses_adds_with_uploaded_location(tmp_path: Path) -> 
         force_reembed=False,
     )
 
-    assert captured["path"] == "/api/v1/workspace/WSTW/update-embeddings"
+    assert captured["path"] == "/api/v1/workspace/ws/update-embeddings"
     assert captured["method"] == "POST"
     assert captured["json_body"] == {"adds": ["custom-documents/name-von-anythingllm.json"]}

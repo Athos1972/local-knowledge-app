@@ -11,6 +11,15 @@ input_root = "~/local-knowledge-data/exports/confluence"
 output_root = "~/local-knowledge-data/staging/confluence"
 manifests_dir = "~/local-knowledge-data/system/confluence_transform"
 
+[scraping_transform]
+# Default-Input für scripts/run_transform_scraping_exports.py,
+# wenn --input-root nicht explizit gesetzt ist.
+input_root = "exports/scraping"
+
+# Default-Output für scripts/run_transform_scraping_exports.py,
+# wenn --output-root nicht explizit gesetzt ist.
+output_root = "staging/transformed"
+
 [publish.confluence]
 input_root = "~/local-knowledge-data/staging/confluence"
 output_root = "~/local-knowledge-data/domains"

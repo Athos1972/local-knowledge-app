@@ -12,6 +12,7 @@ import uuid
 
 from common.config import AppConfig
 from common.logging_setup import get_logger
+from common.time_utils import format_duration_human
 from processing.audit import AuditStage, ReasonCode, build_audit_components
 from processing.manifest import generate_run_id
 from sources.document import utc_now_iso
@@ -95,6 +96,7 @@ class AnythingLLMIngestManifest:
     bytes_total: int = 0
     bytes_uploaded: int = 0
     run_duration: float = 0.0
+    run_duration_human: str = "0s"
     by_top_level_source: dict[str, PerGroupStats] = field(default_factory=dict)
     records: list[dict[str, Any]] = field(default_factory=list)
 
@@ -224,6 +226,7 @@ class AnythingLLMClient:
 
     def __init__(self, config: AnythingLLMIngestConfig):
         self.config = config
+        self.workspace_slug = config.workspace.lower().strip()
 
     def upload_file(self, file_path: Path) -> str:
         content_type, body = _build_multipart_upload_request(
@@ -251,15 +254,15 @@ class AnythingLLMClient:
         return location
 
     def embed_in_workspace(self, *, workspace: str, document_location: str, force_reembed: bool) -> None:
+        _ = workspace
         _ = force_reembed
-        workspace_slug = workspace.strip()
-        path = self.config.workspace_attach_path_template.format(workspace=workspace_slug)
+        path = self.config.workspace_attach_path_template.format(workspace=self.workspace_slug)
         payload: dict[str, Any] = {"adds": [document_location]}
         self._request(
             path,
             method="POST",
             json_body=payload,
-            request_context={"workspace_slug": workspace_slug, "embed_payload": json.dumps(payload, ensure_ascii=False)},
+            request_context={"workspace_slug": self.workspace_slug, "embed_payload": json.dumps(payload, ensure_ascii=False)},
         )
 
     def _request(
@@ -477,6 +480,7 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
 
     manifest.finished_at = utc_now_iso()
     manifest.run_duration = perf_counter() - started
+    manifest.run_duration_human = format_duration_human(manifest.run_duration)
 
     manifests_dir.mkdir(parents=True, exist_ok=True)
     run_manifest_path = manifests_dir / f"run_{manifest.run_id}.json"
@@ -486,7 +490,7 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
     state.save(state_path)
 
     logger.info(
-        "AnythingLLM ingest completed. run_id=%s scanned=%s candidate=%s uploaded=%s embedded=%s skipped=%s failed=%s duration=%.2fs",
+        "AnythingLLM ingest completed. run_id=%s scanned=%s candidate=%s uploaded=%s embedded=%s skipped=%s failed=%s duration=%.2fs (%s)",
         manifest.run_id,
         manifest.files_scanned,
         manifest.files_candidate,
@@ -495,6 +499,7 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
         manifest.files_skipped,
         manifest.files_failed,
         manifest.run_duration,
+        manifest.run_duration_human,
     )
 
     run_context.finish(status="finished" if manifest.files_failed == 0 else "finished_with_errors")
