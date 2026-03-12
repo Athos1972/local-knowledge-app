@@ -43,7 +43,7 @@ def _configure_once(run_id: str | None = None) -> None:
     log_level_name = str(AppConfig.get("logging", "level", default="INFO")).upper()
     log_level = getattr(logging, log_level_name, logging.INFO)
 
-    log_dir = Path(AppConfig.get("logging", "log_dir", default="logs"))
+    log_dir = AppConfig.get_path(None, "logging", "log_dir", default="logs")
     log_to_console = bool(AppConfig.get("logging", "log_to_console", default=True))
     log_to_file = bool(AppConfig.get("logging", "log_to_file", default=True))
     separate_file_per_run = bool(

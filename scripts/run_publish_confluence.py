@@ -6,11 +6,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import sys
+from time import perf_counter
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from common.logging_setup import get_logger
+from common.time_utils import format_duration_human
 from processing.publish.mapping_config import ConfluencePublishConfig
 from processing.publish.publish_manifest import PublishRecord, PublishRunManifest, generate_publish_run_id
 from processing.publish.publish_state import PublishState, PublishStateRecord
@@ -42,6 +44,7 @@ def main() -> int:
     run_id = generate_publish_run_id()
     manifest = PublishRunManifest(run_id=run_id, started_at=utc_now_iso(), mode=mode)
     logger = get_logger("run_publish_confluence", run_id=run_id)
+    started_perf = perf_counter()
 
     state_path = config.manifests_dir / "latest_publish_state.json"
     run_manifest_path = config.manifests_dir / f"run_{run_id}.json"
@@ -143,19 +146,23 @@ def main() -> int:
             )
 
     manifest.finished_at = utc_now_iso()
+    manifest.run_duration = perf_counter() - started_perf
+    manifest.run_duration_human = format_duration_human(manifest.run_duration)
     config.manifests_dir.mkdir(parents=True, exist_ok=True)
     run_manifest_path.write_text(manifest.to_json(), encoding="utf-8")
     latest_manifest_path.write_text(manifest.to_json(), encoding="utf-8")
     state.save(state_path)
 
     logger.info(
-        "Confluence-Publish beendet. run_id=%s seen=%s published=%s skipped=%s failed=%s unmapped=%s",
+        "Confluence-Publish beendet. run_id=%s seen=%s published=%s skipped=%s failed=%s unmapped=%s duration=%.2fs (%s)",
         manifest.run_id,
         manifest.files_seen,
         manifest.files_published,
         manifest.files_skipped,
         manifest.files_failed,
         manifest.files_unmapped,
+        manifest.run_duration,
+        manifest.run_duration_human,
     )
     logger.info("Publish-Manifest: %s", run_manifest_path)
     logger.info("Publish-State: %s", state_path)
