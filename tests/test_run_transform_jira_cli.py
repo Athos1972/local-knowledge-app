@@ -8,9 +8,9 @@ import sys
 
 def test_run_transform_jira_cli_creates_output(tmp_path: Path) -> None:
     input_root = tmp_path / "exports" / "jira"
-    issue_dir = input_root / "inst-a" / "projects" / "ABC" / "issues" / "ABC-321"
+    issue_dir = input_root / "jira" / "inst-a" / "projects" / "by-id" / "1002"
     issue_dir.mkdir(parents=True)
-    (issue_dir / "metadata.json").write_text(
+    (issue_dir / "content.storage.json").write_text(
         '{"id":"1002","key":"ABC-321","fields":{"summary":"CLI issue","project":{"key":"ABC"},"description":"<p>From CLI</p>"}}',
         encoding="utf-8",
     )
