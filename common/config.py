@@ -59,7 +59,7 @@ class AppConfig:
             return cls._config
 
         config_file = os.getenv("APP_CONFIG_FILE", "config/app.toml")
-        path = Path(config_file)
+        path = Path(config_file).expanduser()
 
         if not path.exists():
             cls._config = {}
@@ -93,3 +93,13 @@ class AppConfig:
 
         value = cls.get(*keys, default=default)
         return str(value).strip() if value is not None else default
+
+    @classmethod
+    def get_path(cls, env_key: str | None, *keys: str, default: str) -> Path:
+        """Read path config with optional ENV override and automatic `~` expansion."""
+        if env_key:
+            raw = cls.get_str(env_key, *keys, default=default)
+        else:
+            raw_value = cls.get(*keys, default=default)
+            raw = str(raw_value).strip() if raw_value is not None else default
+        return Path(raw).expanduser()

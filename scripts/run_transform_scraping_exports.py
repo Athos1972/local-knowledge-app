@@ -27,12 +27,12 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    input_root_default = Path(AppConfig.get("scraping_transform", "input_root", default="exports/scraping"))
-    output_root_default = Path(AppConfig.get("scraping_transform", "output_root", default="staging/transformed"))
+    input_root_default = AppConfig.get_path(None, "scraping_transform", "input_root", default="exports/scraping")
+    output_root_default = AppConfig.get_path(None, "scraping_transform", "output_root", default="staging/transformed")
 
     config = TransformRunConfig(
-        input_root=(args.input_root or input_root_default),
-        output_root=(args.output_root or output_root_default),
+        input_root=(args.input_root.expanduser() if args.input_root else input_root_default),
+        output_root=(args.output_root.expanduser() if args.output_root else output_root_default),
         dry_run=args.dry_run,
         limit=args.limit,
         force=args.force,

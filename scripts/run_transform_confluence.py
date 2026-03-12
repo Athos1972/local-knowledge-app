@@ -48,9 +48,9 @@ def main() -> int:
     default_input_root = data_root / "exports" / "confluence"
     default_output_root = data_root / "staging" / "confluence"
 
-    input_root = Path(args.input_root or AppConfig.get("confluence_transform", "input_root", default=str(default_input_root)))
-    output_root = Path(args.output_root or AppConfig.get("confluence_transform", "output_root", default=str(default_output_root)))
-    manifests_dir = Path(AppConfig.get("confluence_transform", "manifests_dir", default=str(data_root / "system" / "confluence_transform")))
+    input_root = Path(args.input_root).expanduser() if args.input_root else AppConfig.get_path(None, "confluence_transform", "input_root", default=str(default_input_root))
+    output_root = Path(args.output_root).expanduser() if args.output_root else AppConfig.get_path(None, "confluence_transform", "output_root", default=str(default_output_root))
+    manifests_dir = AppConfig.get_path(None, "confluence_transform", "manifests_dir", default=str(data_root / "system" / "confluence_transform"))
 
     mode = "full" if args.full_refresh else "incremental"
     effective_run_id = args.run_id or generate_transform_run_id()
