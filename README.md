@@ -161,6 +161,8 @@ python scripts/run_ingest_anythingllm.py --force-reembed
 - `INGEST_DIR` (optional)
 - `MAX_FILE_SIZE_MB` (optional)
 
+Hinweis: `.env` im Repo-Root wird automatisch geladen (alternativ Pfad via `APP_ENV_FILE`). Bereits gesetzte Prozess-ENV-Werte haben Vorrang.
+
 Defaults/strukturierte Konfiguration siehe `config/app.toml` (`[anythingllm]`, `[anythingllm.api]`, `[anythingllm_ingest]`).
 
 ### Delta-Load / State / Reports
