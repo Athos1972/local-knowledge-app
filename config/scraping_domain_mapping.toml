@@ -7,6 +7,11 @@ path_prefix = "wstw/"
 target_subpath = "external/wstw"
 
 [[mapping.rules]]
+id = "jira-prefix"
+path_prefix = "jira/"
+target_subpath = "jira"
+
+[[mapping.rules]]
 id = "energy-prefix"
 path_prefix = "energy/"
 target_subpath = "external/energy"

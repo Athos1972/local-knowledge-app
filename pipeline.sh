@@ -12,11 +12,12 @@ Usage: ./pipeline.sh [options]
 Options:
   --with-anythingllm       Enable AnythingLLM ingest step.
   --skip-anythingllm       Explicitly skip AnythingLLM ingest step.
-  --only <step>            Run only one step. Supported: ingestion, index, ingest-anythingllm
+  --only <step>            Run only one step. Supported: transform-scraping, map-scraping, ingestion, index, ingest-anythingllm
   -h, --help               Show this help.
 
 Examples:
   ./pipeline.sh
+  ./pipeline.sh --only transform-scraping
   ./pipeline.sh --with-anythingllm
   ./pipeline.sh --only ingest-anythingllm
 EOF
@@ -61,6 +62,12 @@ run_step() {
 
 if [[ -n "$ONLY_STEP" ]]; then
   case "$ONLY_STEP" in
+    transform-scraping)
+      run_step "transform-scraping" python scripts/run_transform_scraping_exports.py
+      ;;
+    map-scraping)
+      run_step "map-scraping" python scripts/run_map_transformed_to_domains.py
+      ;;
     ingestion)
       run_step "ingestion" python scripts/run_ingestion.py
       ;;
@@ -78,6 +85,8 @@ if [[ -n "$ONLY_STEP" ]]; then
   exit 0
 fi
 
+run_step "transform-scraping" python scripts/run_transform_scraping_exports.py
+run_step "map-scraping" python scripts/run_map_transformed_to_domains.py
 run_step "ingestion" python scripts/run_ingestion.py
 run_step "index" python scripts/build_vector_index.py
 
