@@ -12,8 +12,6 @@ from processing.anythingllm_ingest import (
     AnythingLLMClient,
     _build_multipart_upload_request,
     _is_non_transient_api_drift_error,
-    _build_embed_payload_candidates,
-    _build_embed_path_candidates,
     build_delta_plan,
     infer_top_level_group,
     is_allowed_extension,
@@ -133,8 +131,6 @@ def test_http_500_with_unexpected_field_does_not_retry(monkeypatch, tmp_path: Pa
         upload_file_field="file",
         upload_folder_field="folder",
         workspace_attach_path_template="/api/v1/workspace/{workspace}/update-embeddings",
-        workspace_attach_documents_key="adds",
-        workspace_attach_force_key="reembed",
         timeout_seconds=2,
         max_retries=3,
         retry_backoff_seconds=0.01,
@@ -173,21 +169,9 @@ def test_http_500_with_unexpected_field_does_not_retry(monkeypatch, tmp_path: Pa
 
 
 
-def test_embed_payload_candidates_include_fallback_keys() -> None:
-    candidates = _build_embed_payload_candidates(
-        document_location="custom-documents/a.md",
-        force_reembed=True,
-        preferred_documents_key="adds",
-        preferred_force_key="reembed",
-    )
-    assert any("adds" in payload for payload in candidates)
-    assert any("documents" in payload for payload in candidates)
-    assert any("paths" in payload for payload in candidates)
-    assert any(payload.get("reembed") is True for payload in candidates)
-    assert any(payload.get("deletes") == [] for payload in candidates)
 
 
-def test_embed_in_workspace_retries_payload_variants_on_400(tmp_path: Path) -> None:
+def test_embed_in_workspace_uses_adds_with_uploaded_location(tmp_path: Path) -> None:
     config = AnythingLLMIngestConfig(
         ingest_dir=tmp_path,
         data_root=tmp_path,
@@ -201,72 +185,28 @@ def test_embed_in_workspace_retries_payload_variants_on_400(tmp_path: Path) -> N
         upload_file_field="file",
         upload_folder_field="folder",
         workspace_attach_path_template="/api/v1/workspace/{workspace}/update-embeddings",
-        workspace_attach_documents_key="adds",
-        workspace_attach_force_key="reembed",
         timeout_seconds=2,
         max_retries=2,
         retry_backoff_seconds=0.01,
     )
     client = AnythingLLMClient(config)
 
-    calls = {"count": 0}
+    captured: dict[str, object] = {}
 
-    # first only 400-like structured error, then success
-    def fake_request2(path: str, *, method: str, body=None, json_body=None, headers=None, request_context=None):
-        calls["count"] += 1
-        if calls["count"] == 1:
-            from processing.anythingllm_ingest import AnythingLLMRequestError
-            raise AnythingLLMRequestError("bad request", status_code=400, response_text="Bad Request")
+    def fake_request(path: str, *, method: str, body=None, json_body=None, headers=None, request_context=None):
+        captured["path"] = path
+        captured["method"] = method
+        captured["json_body"] = json_body
+        captured["request_context"] = request_context
         return {}
 
-    client._request = fake_request2  # type: ignore[method-assign]
-    client.embed_in_workspace(workspace="WSTW", document_location="custom-documents/a.md", force_reembed=False)
-    assert calls["count"] >= 2
-
-
-
-def test_embed_path_candidates_include_legacy_and_v1_paths() -> None:
-    paths = _build_embed_path_candidates(
+    client._request = fake_request  # type: ignore[method-assign]
+    client.embed_in_workspace(
         workspace="WSTW",
-        preferred_path_template="/api/v1/workspace/{workspace}/update-embeddings",
-        configured_templates=["/api/workspace/{workspace}/update-embeddings"],
+        document_location="custom-documents/name-von-anythingllm.json",
+        force_reembed=False,
     )
-    assert "/api/v1/workspace/WSTW/update-embeddings" in paths
-    assert "/api/workspace/WSTW/update-embeddings" in paths
 
-
-def test_embed_in_workspace_fallbacks_on_404_then_success(tmp_path: Path) -> None:
-    config = AnythingLLMIngestConfig(
-        ingest_dir=tmp_path,
-        data_root=tmp_path,
-        workspace="ws",
-        document_folder="custom-documents",
-        allowed_extensions={".md"},
-        max_file_size_bytes=1024,
-        base_url="http://localhost:3001",
-        api_key="token",
-        upload_path="/api/v1/document/upload",
-        upload_file_field="file",
-        upload_folder_field="folder",
-        workspace_attach_path_template="/api/v1/workspace/{workspace}/update-embeddings",
-        workspace_attach_documents_key="adds",
-        workspace_attach_force_key="reembed",
-        workspace_attach_path_templates=["/api/workspace/{workspace}/update-embeddings"],
-        timeout_seconds=2,
-        max_retries=2,
-        retry_backoff_seconds=0.01,
-    )
-    client = AnythingLLMClient(config)
-
-    calls = {"count": 0}
-
-    def fake_request2(path: str, *, method: str, body=None, json_body=None, headers=None, request_context=None):
-        calls["count"] += 1
-        if calls["count"] == 1:
-            from processing.anythingllm_ingest import AnythingLLMRequestError
-            raise AnythingLLMRequestError("not found", status_code=404, response_text="Not Found")
-        return {}
-
-    client._request = fake_request2  # type: ignore[method-assign]
-    client.embed_in_workspace(workspace="WSTW", document_location="custom-documents/a.md", force_reembed=False)
-    assert calls["count"] >= 2
+    assert captured["path"] == "/api/v1/workspace/WSTW/update-embeddings"
+    assert captured["method"] == "POST"
+    assert captured["json_body"] == {"adds": ["custom-documents/name-von-anythingllm.json"]}

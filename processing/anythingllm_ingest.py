@@ -127,8 +127,6 @@ class AnythingLLMIngestConfig:
     upload_file_field: str
     upload_folder_field: str
     workspace_attach_path_template: str
-    workspace_attach_documents_key: str
-    workspace_attach_force_key: str
     timeout_seconds: int
     max_retries: int
     retry_backoff_seconds: float
@@ -137,7 +135,6 @@ class AnythingLLMIngestConfig:
     force_reembed: bool = False
     run_id: str | None = None
     source_instance: str = "anythingllm"
-    workspace_attach_path_templates: list[str] = field(default_factory=list)
 
     @property
     def mode(self) -> str:
@@ -181,16 +178,6 @@ class AnythingLLMIngestConfig:
             "workspace_attach_path_template",
             default="/api/v1/workspace/{workspace}/update-embeddings",
         )
-        path_templates_raw = AppConfig.get_str(
-            "ANYTHINGLLM_WORKSPACE_ATTACH_PATH_TEMPLATES",
-            "anythingllm",
-            "api",
-            "workspace_attach_path_templates",
-            default=path_template,
-        )
-        path_templates = [part.strip() for part in path_templates_raw.split(",") if part.strip()]
-        if path_template not in path_templates:
-            path_templates.insert(0, path_template)
 
         return cls(
             ingest_dir=(ingest_dir or Path(configured_ingest)).expanduser().resolve(),
@@ -217,21 +204,6 @@ class AnythingLLMIngestConfig:
                 default="folder",
             ),
             workspace_attach_path_template=path_template,
-            workspace_attach_path_templates=path_templates,
-            workspace_attach_documents_key=AppConfig.get_str(
-                "ANYTHINGLLM_WORKSPACE_ATTACH_DOCUMENTS_KEY",
-                "anythingllm",
-                "api",
-                "workspace_attach_documents_key",
-                default="adds",
-            ),
-            workspace_attach_force_key=AppConfig.get_str(
-                "ANYTHINGLLM_WORKSPACE_ATTACH_FORCE_KEY",
-                "anythingllm",
-                "api",
-                "workspace_attach_force_key",
-                default="reembed",
-            ),
             timeout_seconds=int(AppConfig.get_str("ANYTHINGLLM_TIMEOUT_SECONDS", "anythingllm", "timeout_seconds", default="30")),
             max_retries=int(AppConfig.get_str("ANYTHINGLLM_MAX_RETRIES", "anythingllm", "max_retries", default="3")),
             retry_backoff_seconds=float(AppConfig.get_str("ANYTHINGLLM_RETRY_BACKOFF_SECONDS", "anythingllm", "retry_backoff_seconds", default="1.0")),
@@ -279,45 +251,15 @@ class AnythingLLMClient:
         return location
 
     def embed_in_workspace(self, *, workspace: str, document_location: str, force_reembed: bool) -> None:
-        path_candidates = _build_embed_path_candidates(
-            workspace=workspace,
-            preferred_path_template=self.config.workspace_attach_path_template,
-            configured_templates=self.config.workspace_attach_path_templates,
-        )
-        payload_candidates = _build_embed_payload_candidates(
-            document_location=document_location,
-            force_reembed=force_reembed,
-            preferred_documents_key=self.config.workspace_attach_documents_key,
-            preferred_force_key=self.config.workspace_attach_force_key,
-        )
-        last_error: AnythingLLMRequestError | None = None
-        for path in path_candidates:
-            for payload in payload_candidates:
-                try:
-                    self._request(
-                        path,
-                        method="POST",
-                        json_body=payload,
-                        request_context={"embed_payload": json.dumps(payload, ensure_ascii=False)},
-                    )
-                    return
-                except AnythingLLMRequestError as exc:
-                    last_error = exc
-                    # Bei 400/404/422 versuchen wir alternative Pfad-/Payload-Schemata für API-Versionen.
-                    if exc.status_code in {400, 404, 422}:
-                        continue
-                    raise
-
-        tried_paths = ", ".join(path_candidates)
-        tried_payloads = ", ".join(json.dumps(item, ensure_ascii=False) for item in payload_candidates)
-        if last_error is not None:
-            raise AnythingLLMRequestError(
-                f"Workspace-Embedding fehlgeschlagen nach Pfad-/Payload-Varianten. paths=[{tried_paths}] payloads=[{tried_payloads}]",
-                status_code=last_error.status_code,
-                response_text=last_error.response_text,
-            ) from last_error
-        raise AnythingLLMRequestError(
-            f"Workspace-Embedding fehlgeschlagen ohne API-Response. paths=[{tried_paths}] payloads=[{tried_payloads}]"
+        _ = force_reembed
+        workspace_slug = workspace.strip()
+        path = self.config.workspace_attach_path_template.format(workspace=workspace_slug)
+        payload: dict[str, Any] = {"adds": [document_location]}
+        self._request(
+            path,
+            method="POST",
+            json_body=payload,
+            request_context={"workspace_slug": workspace_slug, "embed_payload": json.dumps(payload, ensure_ascii=False)},
         )
 
     def _request(
@@ -697,63 +639,3 @@ def _is_non_transient_api_drift_error(response_text: str) -> bool:
     ]
     return any(marker in text for marker in markers)
 
-
-def _build_embed_payload_candidates(
-    *,
-    document_location: str,
-    force_reembed: bool,
-    preferred_documents_key: str,
-    preferred_force_key: str,
-) -> list[dict[str, Any]]:
-    """Erzeugt kompatible Payload-Varianten für Workspace-Embedding.
-
-    Hintergrund: AnythingLLM-API-Schemata können je Version leicht variieren.
-    """
-    doc_keys: list[str] = []
-    for key in [preferred_documents_key, "adds", "documents", "paths"]:
-        normalized = key.strip()
-        if normalized and normalized not in doc_keys:
-            doc_keys.append(normalized)
-
-    force_keys: list[str] = []
-    for key in [preferred_force_key, "reembed", "reEmbed", "embed"]:
-        normalized = key.strip()
-        if normalized and normalized not in force_keys:
-            force_keys.append(normalized)
-
-    candidates: list[dict[str, Any]] = []
-    for doc_key in doc_keys:
-        base = {doc_key: [document_location]}
-        candidates.append(dict(base))
-        # Einige Versionen erwarten deletes explizit als leeres Array.
-        candidates.append({**base, "deletes": []})
-        if force_reembed:
-            for force_key in force_keys:
-                payload = dict(base)
-                payload[force_key] = True
-                candidates.append(payload)
-                candidates.append({**payload, "deletes": []})
-
-    deduped: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        key = json.dumps(candidate, sort_keys=True, ensure_ascii=False)
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(candidate)
-    return deduped
-
-
-def _build_embed_path_candidates(
-    *,
-    workspace: str,
-    preferred_path_template: str,
-    configured_templates: list[str],
-) -> list[str]:
-    templates: list[str] = []
-    for template in [preferred_path_template, *configured_templates, "/api/v1/workspace/{workspace}/update-embeddings", "/api/workspace/{workspace}/update-embeddings"]:
-        normalized = template.strip()
-        if normalized and normalized not in templates:
-            templates.append(normalized)
-    return [template.format(workspace=workspace) for template in templates]

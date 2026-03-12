@@ -160,9 +160,6 @@ python scripts/run_ingest_anythingllm.py --force-reembed
 - `ANYTHINGLLM_DOCUMENT_FOLDER`
 - `ANYTHINGLLM_UPLOAD_FILE_FIELD` (optional, Default: `file`)
 - `ANYTHINGLLM_UPLOAD_FOLDER_FIELD` (optional, Default: `folder`)
-- `ANYTHINGLLM_WORKSPACE_ATTACH_PATH_TEMPLATES` (optional, comma-separated path templates)
-- `ANYTHINGLLM_WORKSPACE_ATTACH_DOCUMENTS_KEY` (optional, Default: `adds`)
-- `ANYTHINGLLM_WORKSPACE_ATTACH_FORCE_KEY` (optional, Default: `reembed`)
 - `INGEST_DIR` (optional)
 - `MAX_FILE_SIZE_MB` (optional)
 
@@ -178,6 +175,7 @@ Defaults/strukturierte Konfiguration siehe `config/app.toml` (`[anythingllm]`, `
 - Nur neue oder geänderte Dateien werden standardmäßig hochgeladen
 - Unveränderte Dateien werden mit Audit-Reason `unchanged_source` übersprungen
 - Dry-Run führt keinen API-Call aus, erzeugt aber vollständige Planung/Stats/Manifest
+- Embed-Payload ist fix: `{"adds": ["<location-aus-upload>"]}` (kein rekonstruiertes Pathing).
 
 Run-Artefakte:
 
