@@ -40,6 +40,8 @@ class RunManifest:
     run_id: str
     started_at: str
     finished_at: str | None = None
+    run_duration: float = 0.0
+    run_duration_human: str = "0s"
     source_name: str = "local-knowledge-data"
     mode: str = "incremental"
     documents_seen: int = 0
