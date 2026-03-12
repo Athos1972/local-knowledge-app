@@ -8,6 +8,7 @@ from pathlib import Path
 from time import sleep, perf_counter
 from typing import Any
 from urllib import error, request
+import uuid
 
 from common.config import AppConfig
 from common.logging_setup import get_logger
@@ -114,6 +115,8 @@ class AnythingLLMIngestConfig:
     base_url: str
     api_key: str
     upload_path: str
+    upload_file_field: str
+    upload_folder_field: str
     workspace_attach_path_template: str
     timeout_seconds: int
     max_retries: int
@@ -169,6 +172,20 @@ class AnythingLLMIngestConfig:
             base_url=AppConfig.get_str("ANYTHINGLLM_BASE_URL", "anythingllm", "base_url", default="http://localhost:3001"),
             api_key=AppConfig.get_str("ANYTHINGLLM_API_KEY", "anythingllm", "api_key", default=""),
             upload_path=AppConfig.get_str("ANYTHINGLLM_UPLOAD_PATH", "anythingllm", "api", "upload_path", default="/api/v1/document/upload"),
+            upload_file_field=AppConfig.get_str(
+                "ANYTHINGLLM_UPLOAD_FILE_FIELD",
+                "anythingllm",
+                "api",
+                "upload_file_field",
+                default="file",
+            ),
+            upload_folder_field=AppConfig.get_str(
+                "ANYTHINGLLM_UPLOAD_FOLDER_FIELD",
+                "anythingllm",
+                "api",
+                "upload_folder_field",
+                default="folder",
+            ),
             workspace_attach_path_template=AppConfig.get_str(
                 "ANYTHINGLLM_WORKSPACE_ATTACH_PATH_TEMPLATE",
                 "anythingllm",
@@ -198,28 +215,21 @@ class AnythingLLMClient:
         self.config = config
 
     def upload_file(self, file_path: Path) -> str:
-        boundary = "----localknowledgeanythingllm"
-        file_bytes = file_path.read_bytes()
-        body = b"\r\n".join(
-            [
-                f"--{boundary}".encode("utf-8"),
-                b'Content-Disposition: form-data; name="files"; filename="' + file_path.name.encode("utf-8") + b'"',
-                b"Content-Type: application/octet-stream",
-                b"",
-                file_bytes,
-                f"--{boundary}".encode("utf-8"),
-                b'Content-Disposition: form-data; name="folder"',
-                b"",
-                self.config.document_folder.encode("utf-8"),
-                f"--{boundary}--".encode("utf-8"),
-                b"",
-            ]
+        content_type, body = _build_multipart_upload_request(
+            file_path=file_path,
+            file_field_name=self.config.upload_file_field,
+            folder_field_name=self.config.upload_folder_field,
+            folder_value=self.config.document_folder,
         )
         response = self._request(
             self.config.upload_path,
             method="POST",
             body=body,
-            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            headers={"Content-Type": content_type},
+            request_context={
+                "file_field": self.config.upload_file_field,
+                "folder_field": self.config.upload_folder_field,
+            },
         )
         location = _extract_document_location(response)
         if not location:
@@ -244,6 +254,7 @@ class AnythingLLMClient:
         body: bytes | None = None,
         json_body: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        request_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         url = f"{self.config.base_url.rstrip('/')}/{path.lstrip('/')}"
         merged_headers = {
@@ -265,11 +276,23 @@ class AnythingLLMClient:
                     return json.loads(payload) if payload else {}
             except error.HTTPError as exc:
                 response_text = exc.read().decode("utf-8", errors="replace")
+                context_parts: list[str] = []
+                if request_context:
+                    context_parts = [f"{key}={value}" for key, value in sorted(request_context.items())]
+                context_msg = f" context=({', '.join(context_parts)})" if context_parts else ""
+
+                if _is_non_transient_api_drift_error(response_text):
+                    raise RuntimeError(
+                        f"AnythingLLM request failed ({exc.code}) {method} {path}:{context_msg} {response_text}. "
+                        "Erkannter nicht-transienter API-Fehler (z.B. Feldname/Schema). "
+                        "Bitte Endpoint und Multipart-Feldnamen gegen <base_url>/api/docs prüfen."
+                    ) from exc
+
                 if exc.code in TRANSIENT_STATUS_CODES and attempt < self.config.max_retries:
                     sleep(self.config.retry_backoff_seconds * attempt)
                     continue
                 raise RuntimeError(
-                    f"AnythingLLM request failed ({exc.code}) {method} {path}: {response_text}. "
+                    f"AnythingLLM request failed ({exc.code}) {method} {path}:{context_msg} {response_text}. "
                     "Falls Endpoint/Payload nicht passt: API-Drift gegen <base_url>/api/docs prüfen."
                 ) from exc
             except (error.URLError, TimeoutError) as exc:
@@ -551,3 +574,47 @@ def _extract_document_location(response: dict[str, Any]) -> str | None:
             elif isinstance(item, str) and item.strip():
                 return item.strip()
     return None
+
+
+def _build_multipart_upload_request(
+    *,
+    file_path: Path,
+    file_field_name: str,
+    folder_field_name: str,
+    folder_value: str,
+) -> tuple[str, bytes]:
+    boundary = f"----localknowledgeanythingllm-{uuid.uuid4().hex}"
+    file_bytes = file_path.read_bytes()
+    body = b"\r\n".join(
+        [
+            f"--{boundary}".encode("utf-8"),
+            (
+                f'Content-Disposition: form-data; name="{file_field_name}"; filename="{file_path.name}"'
+            ).encode("utf-8"),
+            b"Content-Type: application/octet-stream",
+            b"",
+            file_bytes,
+            f"--{boundary}".encode("utf-8"),
+            (
+                f'Content-Disposition: form-data; name="{folder_field_name}"'
+            ).encode("utf-8"),
+            b"",
+            folder_value.encode("utf-8"),
+            f"--{boundary}--".encode("utf-8"),
+            b"",
+        ]
+    )
+    content_type = f"multipart/form-data; boundary={boundary}"
+    return content_type, body
+
+
+def _is_non_transient_api_drift_error(response_text: str) -> bool:
+    text = response_text.lower()
+    markers = [
+        "unexpected field",
+        "invalid file upload",
+        "validation",
+        "invalid multipart",
+        "missing field",
+    ]
+    return any(marker in text for marker in markers)

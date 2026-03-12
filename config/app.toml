@@ -44,6 +44,8 @@ api_key = ""
 [anythingllm.api]
 upload_path = "/api/v1/document/upload"
 workspace_attach_path_template = "/api/v1/workspace/{workspace}/update-embeddings"
+upload_file_field = "file"
+upload_folder_field = "folder"
 
 [anythingllm_ingest]
 ingest_dir = "~/local-knowledge-data/ingest"

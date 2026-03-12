@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib import error
 
 from processing.anythingllm_ingest import (
     AnythingLLMState,
     AnythingLLMFileStateRecord,
     AnythingLLMIngestManifest,
+    AnythingLLMIngestConfig,
+    AnythingLLMClient,
+    _build_multipart_upload_request,
+    _is_non_transient_api_drift_error,
     build_delta_plan,
     infer_top_level_group,
     is_allowed_extension,
@@ -85,3 +90,79 @@ def test_manifest_stats_serialization() -> None:
     assert payload["files_scanned"] == 3
     assert payload["files_uploaded"] == 2
     assert payload["bytes_uploaded"] == 80
+
+
+def test_multipart_builder_uses_configured_field_names(tmp_path: Path) -> None:
+    file_path = tmp_path / "sample.md"
+    file_path.write_text("hello", encoding="utf-8")
+
+    content_type, body = _build_multipart_upload_request(
+        file_path=file_path,
+        file_field_name="file",
+        folder_field_name="folderName",
+        folder_value="custom-documents",
+    )
+
+    assert content_type.startswith("multipart/form-data; boundary=")
+    text = body.decode("utf-8", errors="replace")
+    assert 'name="file"; filename="sample.md"' in text
+    assert 'name="folderName"' in text
+    assert "custom-documents" in text
+    boundary = content_type.split("boundary=", 1)[1]
+    assert body.endswith(f"--{boundary}--\r\n".encode("utf-8"))
+
+
+def test_non_transient_error_marker_detection() -> None:
+    assert _is_non_transient_api_drift_error('{"error": "Invalid file upload. Unexpected field"}')
+    assert not _is_non_transient_api_drift_error('{"error": "temporary backend error"}')
+
+
+def test_http_500_with_unexpected_field_does_not_retry(monkeypatch, tmp_path: Path) -> None:
+    config = AnythingLLMIngestConfig(
+        ingest_dir=tmp_path,
+        data_root=tmp_path,
+        workspace="ws",
+        document_folder="custom-documents",
+        allowed_extensions={".md"},
+        max_file_size_bytes=1024,
+        base_url="http://localhost:3001",
+        api_key="token",
+        upload_path="/api/v1/document/upload",
+        upload_file_field="file",
+        upload_folder_field="folder",
+        workspace_attach_path_template="/api/v1/workspace/{workspace}/update-embeddings",
+        timeout_seconds=2,
+        max_retries=3,
+        retry_backoff_seconds=0.01,
+    )
+    client = AnythingLLMClient(config)
+
+    calls = {"count": 0}
+
+    class DummyFp:
+        def read(self) -> bytes:
+            return b'{"success":false,"error":"Invalid file upload. Unexpected field"}'
+
+        def close(self) -> None:
+            return None
+
+    def fake_urlopen(req, timeout=0):  # noqa: ANN001
+        calls["count"] += 1
+        raise error.HTTPError(req.full_url, 500, "Internal Server Error", hdrs=None, fp=DummyFp())
+
+    monkeypatch.setattr("processing.anythingllm_ingest.request.urlopen", fake_urlopen)
+
+    try:
+        client._request(
+            "/api/v1/document/upload",
+            method="POST",
+            body=b"x",
+            request_context={"file_field": "file", "folder_field": "folder"},
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+        assert "nicht-transienter API-Fehler" in message
+    else:
+        raise AssertionError("RuntimeError expected")
+
+    assert calls["count"] == 1

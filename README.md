@@ -158,6 +158,8 @@ python scripts/run_ingest_anythingllm.py --force-reembed
 - `ANYTHINGLLM_API_KEY`
 - `ANYTHINGLLM_WORKSPACE`
 - `ANYTHINGLLM_DOCUMENT_FOLDER`
+- `ANYTHINGLLM_UPLOAD_FILE_FIELD` (optional, Default: `file`)
+- `ANYTHINGLLM_UPLOAD_FOLDER_FIELD` (optional, Default: `folder`)
 - `INGEST_DIR` (optional)
 - `MAX_FILE_SIZE_MB` (optional)
 
