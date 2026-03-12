@@ -295,16 +295,52 @@ SQLite-Tabellen:
 python scripts/audit_report.py
 python scripts/audit_report.py --date 2026-03-11 --source-type confluence
 python scripts/audit_report.py --run-id 20260311_194512_confluence_full --markdown-out reports/audit_today.md --csv-out reports/problem_documents.csv
+python scripts/audit_report.py --run-id 20260311_194512_confluence_full --drilldown --output-format json --output reports/audit_drilldown.json
 ```
 
 ### Funnel lesen
 
 - `discovered`: erkannte Dokumente
 - `loaded`: erfolgreich geladene Dokumente
-- `transformed`: erfolgreich transformierte Dokumente
+- `unchanged_skipped`: im Incremental-Lauf bewusst übersprungen (nicht verloren)
+- `filtered_skipped`: durch Regeln/Fachfilter verworfen
+- `transform_failed`: technische/fachliche Transform-Fehler
+- `transformed_ok`: erfolgreich transformierte Dokumente (alias `transformed` für Abwärtskompatibilität)
 - `chunked_docs`: Dokumente mit erfolgreichem Chunk-Stage-Event
 - `chunks_created`: Summe erzeugter Chunks
 - `embedded_chunks` / `indexed_chunks`: verarbeitete Chunk-Mengen im Index-Lauf
+
+Zusätzlich zeigt der Report Quoten und Semantik:
+
+- `Transform-Quote = transformed_ok / loaded`
+- `Chunk-Quote = chunked_docs / transformed_ok`
+- `Index-Quote = indexed_chunks / chunks_created`
+- Größter Drop-Off mit Kontext (`loaded -> candidate_for_transform -> transformed_ok`), damit hohe `unchanged_skipped` nicht als Verlust fehlinterpretiert werden.
+
+### Drilldown für problematische Runs
+
+Mit `--drilldown` wird eine Detailansicht pro Dokument/Stage als CSV oder JSON exportiert (Default-Ziel: `reports/`). Enthalten sind u. a.:
+
+- `run_id`, `source_type`, `source_name`
+- `document_id`, `title`, `stage`, `status`
+- `reason_code`, `reason_detail`
+- `raw_text_length`, `transformed_text_length`, `chunk_count`
+- `warning_flags`, `changed_flag`, `is_dirty`
+
+Beispiel (JSON):
+
+```json
+[
+  {
+    "run_id": "20260311_194512_confluence_full",
+    "document_id": "12345",
+    "stage": "filter",
+    "status": "skipped",
+    "reason_code": "unchanged_incremental",
+    "changed_flag": false
+  }
+]
+```
 
 Der größte Unterschied zwischen zwei Stages ist der wichtigste Drop-Off.
 
@@ -315,4 +351,5 @@ Neue Quellen können ohne neue Infrastruktur instrumentiert werden:
 1. Run-Kontext erstellen (`build_audit_components(...)`)
 2. Stage-Übergänge mit `with audit.stage(...):` umschließen
 3. Bei fachlichem Verwerfen `evt.skipped(<reason_code>)`, bei technischen Fehlern `evt.error(...)`
-4. Neue Reason-Codes zentral in `processing/audit/models.py` ergänzen (`ReasonCode`)
+4. Neue Reason-Codes zentral in `processing/audit/models.py` ergänzen (`ReasonCode`) – stabile IDs statt Freitext
+5. Für neue Filterregeln möglichst spezifische Codes vergeben (z. B. `ignore_hidden_file`, `empty_after_transform`) und optional strukturierte Details in `extra_json` ablegen

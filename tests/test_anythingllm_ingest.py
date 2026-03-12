@@ -219,3 +219,58 @@ def test_embed_in_workspace_uses_adds_with_uploaded_location(tmp_path: Path) -> 
     assert captured["path"] == "/api/v1/workspace/ws/update-embeddings"
     assert captured["method"] == "POST"
     assert captured["json_body"] == {"adds": ["custom-documents/name-von-anythingllm.json"]}
+
+
+def test_run_lifecycle_finishes_failed_on_unhandled_exception(monkeypatch, tmp_path: Path) -> None:
+    from processing import anythingllm_ingest as mod
+
+    config = mod.AnythingLLMIngestConfig(
+        ingest_dir=tmp_path,
+        data_root=tmp_path,
+        workspace="ws",
+        document_folder="docs",
+        allowed_extensions={".md"},
+        max_file_size_bytes=1024,
+        base_url="http://localhost:3001",
+        api_key="token",
+        upload_path="/api/v1/document/upload",
+        upload_file_field="file",
+        upload_folder_field="folder",
+        workspace_attach_path_template="/api/v1/workspace/{workspace}/update-embeddings",
+        timeout_seconds=2,
+        max_retries=1,
+        retry_backoff_seconds=0.0,
+    )
+
+    class DummyRunContext:
+        run_id = "run-ctx"
+
+        def __init__(self):
+            self.status = None
+
+        def finish(self, status: str = "finished") -> None:
+            self.status = status
+
+    class DummyAudit:
+        def stage(self, **kwargs):  # noqa: ANN003
+            class Ctx:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            return Ctx()
+
+    dummy_context = DummyRunContext()
+    monkeypatch.setattr(mod, "build_audit_components", lambda **kwargs: (dummy_context, DummyAudit()))
+    monkeypatch.setattr(mod, "build_delta_plan", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    try:
+        mod.run_anythingllm_ingest(config)
+    except RuntimeError as exc:
+        assert str(exc) == "boom"
+    else:
+        raise AssertionError("RuntimeError expected")
+
+    assert dummy_context.status == "failed"

@@ -356,154 +356,171 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
     )
 
     client = AnythingLLMClient(config)
-    entries = build_delta_plan(config.ingest_dir, config.allowed_extensions, config.max_file_size_bytes, state)
+    final_status = "running"
+    exit_code = 1
 
-    for entry in entries:
-        _touch_group(manifest, entry.top_level_group).scanned += 1
-        manifest.files_scanned += 1
-        manifest.bytes_total += entry.size_bytes
-        with audit.stage(
-            run_id=run_context.run_id,
-            source_type="anythingllm_ingest",
-            source_instance=config.source_instance,
-            stage=AuditStage.DISCOVER,
-            document_id=entry.relative_path,
-            document_uri=entry.absolute_path.as_uri(),
-            document_title=entry.absolute_path.name,
-        ):
-            pass
+    try:
+        entries = build_delta_plan(config.ingest_dir, config.allowed_extensions, config.max_file_size_bytes, state)
 
-        if entry.action in {"filtered", "too_large"}:
-            logger.info("File discovered but filtered. file=%s reason=%s", entry.relative_path, entry.action)
-            manifest.files_skipped += 1
-            _touch_group(manifest, entry.top_level_group).skipped += 1
+        for entry in entries:
+            _touch_group(manifest, entry.top_level_group).scanned += 1
+            manifest.files_scanned += 1
+            manifest.bytes_total += entry.size_bytes
             with audit.stage(
                 run_id=run_context.run_id,
                 source_type="anythingllm_ingest",
                 source_instance=config.source_instance,
-                stage=AuditStage.FILTER,
-                document_id=entry.relative_path,
-                document_uri=entry.absolute_path.as_uri(),
-                document_title=entry.absolute_path.name,
-            ) as filter_evt:
-                filter_evt.skipped(ReasonCode.FILTERED_BY_RULE, f"Filtered action={entry.action}")
-            manifest.records.append(_record(entry, status="skipped", reason=entry.action))
-            continue
-
-        if entry.action == "unchanged" and not config.force_reupload and not config.force_reembed:
-            logger.info("File skipped unchanged by delta. file=%s", entry.relative_path)
-            manifest.files_unchanged += 1
-            manifest.files_skipped += 1
-            _touch_group(manifest, entry.top_level_group).skipped += 1
-            with audit.stage(
-                run_id=run_context.run_id,
-                source_type="anythingllm_ingest",
-                source_instance=config.source_instance,
-                stage=AuditStage.FILTER,
-                document_id=entry.relative_path,
-                document_uri=entry.absolute_path.as_uri(),
-                document_title=entry.absolute_path.name,
-            ) as filter_evt:
-                filter_evt.skipped(ReasonCode.UNCHANGED_SOURCE, "Datei unverändert")
-            manifest.records.append(_record(entry, status="skipped", reason="unchanged"))
-            continue
-
-        manifest.files_candidate += 1
-        if entry.action == "new":
-            manifest.files_new += 1
-        elif entry.action == "changed":
-            manifest.files_changed += 1
-
-        should_upload = config.force_reupload or entry.action in {"new", "changed"}
-
-        logger.info("Upload started. file=%s upload=%s", entry.relative_path, should_upload)
-        uploaded_document: str | None = None
-        if should_upload:
-            with audit.stage(
-                run_id=run_context.run_id,
-                source_type="anythingllm_ingest",
-                source_instance=config.source_instance,
-                stage=AuditStage.LOAD,
+                stage=AuditStage.DISCOVER,
                 document_id=entry.relative_path,
                 document_uri=entry.absolute_path.as_uri(),
                 document_title=entry.absolute_path.name,
             ):
                 pass
 
-        try:
-            if config.dry_run:
-                uploaded_document = state.files.get(entry.relative_path).uploaded_document if entry.relative_path in state.files else f"dry-run/{entry.relative_path}"
-            elif should_upload:
-                uploaded_document = client.upload_file(entry.absolute_path)
-                manifest.files_uploaded += 1
-                manifest.bytes_uploaded += entry.size_bytes
-                _touch_group(manifest, entry.top_level_group).uploaded += 1
-                logger.info("Upload successful. file=%s doc=%s", entry.relative_path, uploaded_document)
-            else:
-                uploaded_document = state.files.get(entry.relative_path).uploaded_document if entry.relative_path in state.files else None
+            if entry.action in {"filtered", "too_large"}:
+                logger.info("File discovered but filtered. file=%s reason=%s", entry.relative_path, entry.action)
+                manifest.files_skipped += 1
+                _touch_group(manifest, entry.top_level_group).skipped += 1
+                with audit.stage(
+                    run_id=run_context.run_id,
+                    source_type="anythingllm_ingest",
+                    source_instance=config.source_instance,
+                    stage=AuditStage.FILTER,
+                    document_id=entry.relative_path,
+                    document_uri=entry.absolute_path.as_uri(),
+                    document_title=entry.absolute_path.name,
+                    extra_json={"changed_flag": False, "is_dirty": False},
+                ) as filter_evt:
+                    reason_code = ReasonCode.IGNORE_SYSTEM_FILE if entry.action == "filtered" else ReasonCode.FILTERED_BY_RULE
+                    filter_evt.skipped(reason_code, f"Filtered action={entry.action}")
+                manifest.records.append(_record(entry, status="skipped", reason=entry.action))
+                continue
 
-            if not uploaded_document:
-                raise RuntimeError("Kein Dokument-Identifier für Embedding vorhanden")
+            if entry.action == "unchanged" and not config.force_reupload and not config.force_reembed:
+                logger.info("File skipped unchanged by delta. file=%s", entry.relative_path)
+                manifest.files_unchanged += 1
+                manifest.files_skipped += 1
+                _touch_group(manifest, entry.top_level_group).skipped += 1
+                with audit.stage(
+                    run_id=run_context.run_id,
+                    source_type="anythingllm_ingest",
+                    source_instance=config.source_instance,
+                    stage=AuditStage.FILTER,
+                    document_id=entry.relative_path,
+                    document_uri=entry.absolute_path.as_uri(),
+                    document_title=entry.absolute_path.name,
+                    extra_json={"changed_flag": False, "is_dirty": False},
+                ) as filter_evt:
+                    filter_evt.skipped(ReasonCode.UNCHANGED_INCREMENTAL, "Datei unverändert")
+                manifest.records.append(_record(entry, status="skipped", reason="unchanged"))
+                continue
 
-            logger.info("Embedding started. file=%s workspace=%s", entry.relative_path, config.workspace)
-            with audit.stage(
-                run_id=run_context.run_id,
-                source_type="anythingllm_ingest",
-                source_instance=config.source_instance,
-                stage=AuditStage.EMBED,
-                document_id=entry.relative_path,
-                document_uri=entry.absolute_path.as_uri(),
-                document_title=entry.absolute_path.name,
-            ):
-                pass
-            if not config.dry_run:
-                client.embed_in_workspace(
-                    workspace=config.workspace,
-                    document_location=uploaded_document,
-                    force_reembed=config.force_reembed,
+            manifest.files_candidate += 1
+            if entry.action == "new":
+                manifest.files_new += 1
+            elif entry.action == "changed":
+                manifest.files_changed += 1
+
+            should_upload = config.force_reupload or entry.action in {"new", "changed"}
+            logger.info("Upload started. file=%s upload=%s", entry.relative_path, should_upload)
+            uploaded_document: str | None = None
+            if should_upload:
+                with audit.stage(
+                    run_id=run_context.run_id,
+                    source_type="anythingllm_ingest",
+                    source_instance=config.source_instance,
+                    stage=AuditStage.LOAD,
+                    document_id=entry.relative_path,
+                    document_uri=entry.absolute_path.as_uri(),
+                    document_title=entry.absolute_path.name,
+                    extra_json={"changed_flag": True, "is_dirty": True},
+                ):
+                    pass
+
+            try:
+                if config.dry_run:
+                    uploaded_document = state.files.get(entry.relative_path).uploaded_document if entry.relative_path in state.files else f"dry-run/{entry.relative_path}"
+                elif should_upload:
+                    uploaded_document = client.upload_file(entry.absolute_path)
+                    manifest.files_uploaded += 1
+                    manifest.bytes_uploaded += entry.size_bytes
+                    _touch_group(manifest, entry.top_level_group).uploaded += 1
+                    logger.info("Upload successful. file=%s doc=%s", entry.relative_path, uploaded_document)
+                else:
+                    uploaded_document = state.files.get(entry.relative_path).uploaded_document if entry.relative_path in state.files else None
+
+                if not uploaded_document:
+                    raise RuntimeError("Kein Dokument-Identifier für Embedding vorhanden")
+
+                logger.info("Embedding started. file=%s workspace=%s", entry.relative_path, config.workspace)
+                with audit.stage(
+                    run_id=run_context.run_id,
+                    source_type="anythingllm_ingest",
+                    source_instance=config.source_instance,
+                    stage=AuditStage.EMBED,
+                    document_id=entry.relative_path,
+                    document_uri=entry.absolute_path.as_uri(),
+                    document_title=entry.absolute_path.name,
+                    extra_json={"changed_flag": True, "is_dirty": True},
+                ):
+                    pass
+                if not config.dry_run:
+                    client.embed_in_workspace(
+                        workspace=config.workspace,
+                        document_location=uploaded_document,
+                        force_reembed=config.force_reembed,
+                    )
+                manifest.files_embedded += 1
+                _touch_group(manifest, entry.top_level_group).embedded += 1
+                logger.info("Embedding successful. file=%s", entry.relative_path)
+                state.files[entry.relative_path] = AnythingLLMFileStateRecord(
+                    sha256=entry.sha256,
+                    size_bytes=entry.size_bytes,
+                    uploaded_document=uploaded_document,
+                    updated_at=utc_now_iso(),
                 )
-            manifest.files_embedded += 1
-            _touch_group(manifest, entry.top_level_group).embedded += 1
-            logger.info("Embedding successful. file=%s", entry.relative_path)
-            state.files[entry.relative_path] = AnythingLLMFileStateRecord(
-                sha256=entry.sha256,
-                size_bytes=entry.size_bytes,
-                uploaded_document=uploaded_document,
-                updated_at=utc_now_iso(),
-            )
-            manifest.records.append(_record(entry, status="ok", uploaded_document=uploaded_document))
-        except Exception as exc:  # noqa: BLE001
-            manifest.files_failed += 1
-            _touch_group(manifest, entry.top_level_group).failed += 1
-            logger.exception("File processing failed. file=%s error=%s", entry.relative_path, exc)
-            manifest.records.append(_record(entry, status="error", reason=str(exc)))
+                manifest.records.append(_record(entry, status="ok", uploaded_document=uploaded_document))
+            except Exception as exc:  # noqa: BLE001
+                manifest.files_failed += 1
+                _touch_group(manifest, entry.top_level_group).failed += 1
+                logger.exception("File processing failed. file=%s error=%s", entry.relative_path, exc)
+                manifest.records.append(_record(entry, status="error", reason=str(exc)))
 
-    manifest.finished_at = utc_now_iso()
-    manifest.run_duration = perf_counter() - started
-    manifest.run_duration_human = format_duration_human(manifest.run_duration)
+        final_status = "finished" if manifest.files_failed == 0 else "finished_with_errors"
+        exit_code = 0 if manifest.files_failed == 0 else 1
+    except Exception:
+        final_status = "failed"
+        manifest.files_failed += 1
+        logger.exception("AnythingLLM ingest aborted unexpectedly. run_id=%s", manifest.run_id)
+        raise
+    finally:
+        manifest.finished_at = utc_now_iso()
+        manifest.run_duration = perf_counter() - started
+        manifest.run_duration_human = format_duration_human(manifest.run_duration)
 
-    manifests_dir.mkdir(parents=True, exist_ok=True)
-    run_manifest_path = manifests_dir / f"run_{manifest.run_id}.json"
-    latest_manifest_path = manifests_dir / "latest_manifest.json"
-    run_manifest_path.write_text(manifest.to_json(), encoding="utf-8")
-    latest_manifest_path.write_text(manifest.to_json(), encoding="utf-8")
-    state.save(state_path)
+        manifests_dir.mkdir(parents=True, exist_ok=True)
+        run_manifest_path = manifests_dir / f"run_{manifest.run_id}.json"
+        latest_manifest_path = manifests_dir / "latest_manifest.json"
+        run_manifest_path.write_text(manifest.to_json(), encoding="utf-8")
+        latest_manifest_path.write_text(manifest.to_json(), encoding="utf-8")
+        state.save(state_path)
 
-    logger.info(
-        "AnythingLLM ingest completed. run_id=%s scanned=%s candidate=%s uploaded=%s embedded=%s skipped=%s failed=%s duration=%.2fs (%s)",
-        manifest.run_id,
-        manifest.files_scanned,
-        manifest.files_candidate,
-        manifest.files_uploaded,
-        manifest.files_embedded,
-        manifest.files_skipped,
-        manifest.files_failed,
-        manifest.run_duration,
-        manifest.run_duration_human,
-    )
+        logger.info(
+            "AnythingLLM ingest completed. run_id=%s scanned=%s candidate=%s uploaded=%s embedded=%s skipped=%s failed=%s duration=%.2fs (%s)",
+            manifest.run_id,
+            manifest.files_scanned,
+            manifest.files_candidate,
+            manifest.files_uploaded,
+            manifest.files_embedded,
+            manifest.files_skipped,
+            manifest.files_failed,
+            manifest.run_duration,
+            manifest.run_duration_human,
+        )
 
-    run_context.finish(status="finished" if manifest.files_failed == 0 else "finished_with_errors")
-    return (0 if manifest.files_failed == 0 else 1), manifest
+        run_context.finish(status=final_status)
+
+    return exit_code, manifest
 
 
 def build_delta_plan(
@@ -643,4 +660,3 @@ def _is_non_transient_api_drift_error(response_text: str) -> bool:
         "missing field",
     ]
     return any(marker in text for marker in markers)
-

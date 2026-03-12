@@ -14,6 +14,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from processing.audit.reporting import (  # noqa: E402
     AuditReportService,
     ReportFilters,
+    export_drilldown_csv,
+    export_drilldown_json,
     export_problem_documents_csv,
     render_console,
     render_markdown,
@@ -31,6 +33,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--format", choices=["console", "markdown"], default="console")
     parser.add_argument("--markdown-out", default=None)
     parser.add_argument("--csv-out", default=None)
+    parser.add_argument("--drilldown", action="store_true", help="Detaillierten Dokument-Drilldown exportieren")
+    parser.add_argument("--output", default=None, help="Ausgabepfad für Drilldown-CSV/JSON")
+    parser.add_argument("--output-format", choices=["csv", "json"], default="csv", help="Format für Drilldown-Ausgabe")
     return parser.parse_args()
 
 
@@ -40,20 +45,15 @@ def main() -> int:
 
     repository = AuditRepository(args.root / "system" / "audit" / "pipeline_audit.sqlite")
     service = AuditReportService(repository)
-    report = service.build_report(
-        ReportFilters(
-            report_date=report_date,
-            run_id=args.run_id,
-            source_type=args.source_type,
-            source_instance=args.source_instance,
-        )
+    filters = ReportFilters(
+        report_date=report_date,
+        run_id=args.run_id,
+        source_type=args.source_type,
+        source_instance=args.source_instance,
     )
+    report = service.build_report(filters)
 
-    if args.format == "markdown":
-        output = render_markdown(report)
-    else:
-        output = render_console(report)
-
+    output = render_markdown(report) if args.format == "markdown" else render_console(report)
     print(output)
 
     if args.markdown_out:
@@ -66,6 +66,16 @@ def main() -> int:
         csv_path = Path(args.csv_out)
         export_problem_documents_csv(report, csv_path)
         print(f"CSV geschrieben: {csv_path}")
+
+    if args.drilldown:
+        rows = service.build_drilldown(filters)
+        default_name = f"audit_drilldown_{args.run_id or report_date.isoformat()}.{args.output_format}"
+        output_path = Path(args.output or (Path("reports") / default_name))
+        if args.output_format == "json":
+            export_drilldown_json(rows, output_path)
+        else:
+            export_drilldown_csv(rows, output_path)
+        print(f"Drilldown geschrieben: {output_path} ({len(rows)} Zeilen)")
 
     return 0
 

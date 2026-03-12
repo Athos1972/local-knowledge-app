@@ -121,8 +121,9 @@ def main() -> int:
                 document_id=source_doc.doc_id,
                 document_uri=source_doc.source.source_ref,
                 document_title=source_doc.title,
+                extra_json={"changed_flag": False, "is_dirty": False},
             ) as filter_evt:
-                filter_evt.skipped(ReasonCode.FILTERED_BY_RULE, "Dokument unverändert (Checksumme identisch)")
+                filter_evt.skipped(ReasonCode.UNCHANGED_INCREMENTAL, "Dokument unverändert (Checksumme identisch)")
 
             run_manifest.documents_skipped += 1
             processed_at = utc_now_iso()
@@ -154,12 +155,13 @@ def main() -> int:
                 document_id=source_doc.doc_id,
                 document_uri=source_doc.source.source_ref,
                 document_title=source_doc.title,
+                extra_json={"changed_flag": True, "is_dirty": True},
             ) as transform_evt:
                 transform_evt.event.input_count = len(source_doc.content)
                 normalized = normalizer.normalize(source_doc)
                 transform_evt.event.output_count = len(normalized.body)
                 if not normalized.body.strip():
-                    transform_evt.warning(ReasonCode.NO_TEXT_AFTER_CLEANUP, "Nach Normalisierung ist kein Text mehr vorhanden")
+                    transform_evt.warning(ReasonCode.EMPTY_AFTER_TRANSFORM, "Nach Normalisierung ist kein Text mehr vorhanden")
 
             writer.write_document(normalized)
 
@@ -220,7 +222,7 @@ def main() -> int:
                 document_uri=source_doc.source.source_ref,
                 document_title=source_doc.title,
             ) as error_evt:
-                error_evt.error(ReasonCode.UNKNOWN_EXCEPTION, str(exc))
+                error_evt.error(ReasonCode.TRANSFORM_EXCEPTION, str(exc))
 
             processed_at = utc_now_iso()
             run_manifest.documents_failed += 1

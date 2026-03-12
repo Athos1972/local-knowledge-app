@@ -114,8 +114,9 @@ def main() -> int:
                 document_id=page.page_id,
                 document_uri=page.source_ref,
                 document_title=page.title,
+                extra_json={"changed_flag": False, "is_dirty": False},
             ) as filter_evt:
-                filter_evt.skipped(ReasonCode.FILTERED_BY_RULE, "Seite unverändert")
+                filter_evt.skipped(ReasonCode.UNCHANGED_INCREMENTAL, "Seite unverändert")
 
             manifest.pages_skipped += 1
             manifest.records.append(
@@ -142,13 +143,14 @@ def main() -> int:
                 document_id=page.page_id,
                 document_uri=page.source_ref,
                 document_title=page.title,
+                extra_json={"changed_flag": True, "is_dirty": True},
             ) as transform_evt:
                 transform_evt.event.input_count = len(page.body)
                 transformed = transformer.transform(page)
                 markdown = renderer.render(transformed)
                 transform_evt.event.output_count = len(markdown)
                 if not markdown.strip():
-                    transform_evt.skipped(ReasonCode.NO_TEXT_AFTER_CLEANUP, "Nach Rendering kein Text übrig")
+                    transform_evt.skipped(ReasonCode.EMPTY_AFTER_TRANSFORM, "Nach Rendering kein Text übrig")
             with audit.stage(
                 run_id=run_context.run_id,
                 source_type="confluence",
