@@ -74,6 +74,30 @@ class ConfluenceTableTransformerTests(unittest.TestCase):
 
         self.assertIn("| Produkt | Q1 | Q2 |", result.body_markdown)
         self.assertNotIn("- **Produkt:**", result.body_markdown)
+        self.assertEqual([], result.extra_documents)
+
+    def test_complex_table_creates_extra_document_and_reference(self) -> None:
+        rows = "".join(f"<tr><td>R{i}</td><td>{i}</td><td>{i+1}</td><td>{i+2}</td><td>{i+3}</td><td>{i+4}</td><td>{i+5}</td></tr>" for i in range(1, 5))
+        page = ConfluenceRawPage(
+            page_id="123456",
+            space_key="DOC",
+            title="Marktkommunikation",
+            body="<table><tr><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th></tr>" + rows + "</table>",
+            source_ref="dummy",
+            source_url="https://example.local/page",
+            labels=["alpha"],
+        )
+
+        result = ConfluenceTransformer().transform(page)
+
+        self.assertEqual(1, len(result.extra_documents))
+        extra = result.extra_documents[0]
+        self.assertEqual("123456__marktkommunikation__table_01.md", extra.file_name)
+        self.assertIn("[Komplexe Tabelle ausgelagert: 123456__marktkommunikation__table_01.md]", result.body_markdown)
+        self.assertEqual("confluence_table", extra.doc_type)
+        self.assertTrue(extra.metadata.get("table_complexity"))
+        self.assertEqual(1, extra.metadata.get("table_index"))
+        self.assertTrue(any(w.code == "complex_table" for w in result.transform_warnings))
 
 
 if __name__ == "__main__":

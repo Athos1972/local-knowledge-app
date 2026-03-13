@@ -31,6 +31,18 @@ class MacroTransformer:
         unsupported: list[str] = []
 
         transformed = text
+        max_iterations = 15
+        for _ in range(max_iterations):
+            previous = transformed
+            transformed = self._transform_known_macros(transformed, warnings)
+            transformed = self._unwrap_unsupported_macros(transformed, warnings, unsupported)
+            if transformed == previous:
+                break
+
+        return transformed, warnings, unsupported
+
+    def _transform_known_macros(self, text: str, warnings: list[TransformWarning]) -> str:
+        transformed = text
         for macro in SUPPORTED_CALLOUTS:
             transformed = self._replace_callout_macro(transformed, macro)
 
@@ -42,7 +54,14 @@ class MacroTransformer:
         transformed = self._unwrap_table_filter_macro(transformed, warnings)
         transformed = self._replace_jira_macro(transformed, warnings)
         transformed = self._replace_view_file_macro(transformed, warnings)
+        return transformed
 
+    def _unwrap_unsupported_macros(
+        self,
+        text: str,
+        warnings: list[TransformWarning],
+        unsupported: list[str],
+    ) -> str:
         macro_pattern = re.compile(
             r"<ac:structured-macro\b(?P<attrs>[^>]*)>(?P<body>.*?)</ac:structured-macro>",
             re.DOTALL,
@@ -52,6 +71,7 @@ class MacroTransformer:
             macro_name = self._extract_macro_name(match.group("attrs"), warnings)
             if macro_name in SUPPORTED_CALLOUTS | SUPPORTED_SIMPLE:
                 return match.group(0)
+
             unsupported.append(macro_name)
             warnings.append(
                 TransformWarning(
@@ -60,10 +80,22 @@ class MacroTransformer:
                     context=macro_name,
                 )
             )
-            return f"\n[UNSUPPORTED_MACRO: {macro_name}]\n"
+            inner = self._extract_macro_inner_content(match.group("body"))
+            return f"\n{inner}\n" if inner.strip() else ""
 
-        transformed = macro_pattern.sub(replace_unsupported, transformed)
-        return transformed, warnings, unsupported
+        return macro_pattern.sub(replace_unsupported, text)
+
+    def _extract_macro_inner_content(self, body: str) -> str:
+        rich_text_match = re.search(r"<ac:rich-text-body>(.*?)</ac:rich-text-body>", body, re.DOTALL)
+        if rich_text_match:
+            return rich_text_match.group(1)
+
+        plain_text_match = re.search(r"<ac:plain-text-body><!\[CDATA\[(.*?)\]\]></ac:plain-text-body>", body, re.DOTALL)
+        if plain_text_match:
+            return plain_text_match.group(1)
+
+        parameter_content = re.sub(r"<ac:parameter[^>]*>.*?</ac:parameter>", "", body, flags=re.DOTALL)
+        return parameter_content
 
     def _replace_callout_macro(self, text: str, macro_name: str) -> str:
         pattern = re.compile(

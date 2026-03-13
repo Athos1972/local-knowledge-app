@@ -7,7 +7,7 @@ from html.parser import HTMLParser
 import logging
 import re
 
-from processing.confluence.models import TransformWarning
+from processing.confluence.models import ConfluenceExtraDocument, TransformWarning
 
 
 logger = logging.getLogger(__name__)
@@ -40,6 +40,7 @@ class TableTransformResult:
     markdown: str
     warning: TransformWarning | None = None
     key_value_properties: dict[str, str] = field(default_factory=dict)
+    extra_document: ConfluenceExtraDocument | None = None
 
 
 class _TableParser(HTMLParser):
@@ -117,12 +118,26 @@ class _TableParser(HTMLParser):
 class TableTransformer:
     """Klassifiziert Tabellen und rendert konservativ in Markdown."""
 
-    def transform(self, text: str) -> tuple[str, list[TransformWarning], dict[str, str], int]:
-        warnings: list[TransformWarning] = []
+    def transform(
+        self,
+        text: str,
+        *,
+        page_id: str,
+        page_title: str,
+        page_slug: str,
+        source_url: str | None,
+        labels: list[str],
+        parent_title: str | None,
+        content_hash: str,
+        warnings: list[TransformWarning],
+    ) -> tuple[str, dict[str, str], int, list[ConfluenceExtraDocument]]:
         key_value_properties: dict[str, str] = {}
         key_value_count = 0
+        complex_table_index = 0
+        extra_documents: list[ConfluenceExtraDocument] = []
 
         def replace_table(match: re.Match[str]) -> str:
+            nonlocal key_value_count, complex_table_index
             table_html = match.group(0)
             parser = _TableParser()
             parser.feed(table_html)
@@ -131,20 +146,48 @@ class TableTransformer:
                 has_nested_table=parser.has_nested_table,
                 has_span_complexity=parser.has_span_complexity,
             )
-            result = self._render_table(parsed_table)
+            result = self._render_table(
+                parsed_table,
+                page_id=page_id,
+                page_title=page_title,
+                page_slug=page_slug,
+                source_url=source_url,
+                labels=labels,
+                parent_title=parent_title,
+                content_hash=content_hash,
+                complex_table_index=complex_table_index + 1,
+            )
             if result.warning:
                 warnings.append(result.warning)
             if result.key_value_properties:
-                nonlocal key_value_count
                 key_value_count += 1
                 key_value_properties.update(result.key_value_properties)
+            if result.extra_document:
+                complex_table_index += 1
+                extra_documents.append(result.extra_document)
             return result.markdown
 
         transformed = re.sub(r"<table\b[^>]*>.*?</table>", replace_table, text, flags=re.DOTALL | re.IGNORECASE)
-        logger.debug("Tabellenanalyse abgeschlossen: key_value_tables=%s", key_value_count)
-        return transformed, warnings, key_value_properties, key_value_count
+        logger.debug(
+            "Tabellenanalyse abgeschlossen: key_value_tables=%s, complex_tables=%s",
+            key_value_count,
+            len(extra_documents),
+        )
+        return transformed, key_value_properties, key_value_count, extra_documents
 
-    def _render_table(self, table: ParsedTable) -> TableTransformResult:
+    def _render_table(
+        self,
+        table: ParsedTable,
+        *,
+        page_id: str,
+        page_title: str,
+        page_slug: str,
+        source_url: str | None,
+        labels: list[str],
+        parent_title: str | None,
+        content_hash: str,
+        complex_table_index: int,
+    ) -> TableTransformResult:
         if not table.rows:
             return TableTransformResult(markdown="")
 
@@ -154,16 +197,116 @@ class TableTransformer:
         if self._is_key_value_table(table):
             markdown, properties = self._as_key_value(table.rows)
             return TableTransformResult(markdown=markdown, key_value_properties=properties)
-        if row_count <= 15 and col_count <= 6:
+        if row_count <= 15 and col_count <= 6 and not table.has_nested_table and not table.has_span_complexity:
             return TableTransformResult(markdown=self._as_markdown_table(table.rows))
 
+        file_name = f"{page_id}__{page_slug}__table_{complex_table_index:02d}.md"
+        context = f"rows={row_count}, cols={col_count}, nested={table.has_nested_table}, spans={table.has_span_complexity}"
+        markdown = (
+            f"\n[Komplexe Tabelle ausgelagert: {file_name}]\n"
+            f"Hinweis: {context}.\n"
+        )
+        artifact = self._build_complex_table_document(
+            file_name=file_name,
+            table=table,
+            page_id=page_id,
+            page_title=page_title,
+            source_url=source_url,
+            labels=labels,
+            parent_title=parent_title,
+            content_hash=content_hash,
+            table_index=complex_table_index,
+        )
         return TableTransformResult(
-            markdown="\n[COMPLEX_TABLE: Konvertierung nicht sicher möglich]\n",
+            markdown=markdown,
             warning=TransformWarning(
                 code="complex_table",
-                message="Komplexe Tabelle konnte nicht sicher als Markdown gerendert werden.",
+                message="Komplexe Tabelle wurde als separates Markdown-Artefakt ausgelagert.",
+                context=context,
             ),
+            extra_document=artifact,
         )
+
+    def _build_complex_table_document(
+        self,
+        *,
+        file_name: str,
+        table: ParsedTable,
+        page_id: str,
+        page_title: str,
+        source_url: str | None,
+        labels: list[str],
+        parent_title: str | None,
+        content_hash: str,
+        table_index: int,
+    ) -> ConfluenceExtraDocument:
+        row_count = len(table.rows)
+        col_count = max(len(row) for row in table.rows)
+        lines = [
+            f"# Tabelle aus: {page_title}",
+            "",
+            "Diese Tabelle wurde wegen komplexer Struktur aus der Hauptseite ausgelagert.",
+            f"Erkannte Struktur: Zeilen={row_count}, Spalten={col_count}, nested_table={table.has_nested_table}, spans={table.has_span_complexity}.",
+            "",
+            "## Inhalt (konservativ abgeflacht)",
+            "",
+        ]
+        lines.extend(self._flatten_rows(table.rows))
+        if not lines[-1]:
+            body = "\n".join(lines)
+        else:
+            body = "\n".join(lines) + "\n"
+
+        metadata = {
+            "title": f"Tabelle {table_index:02d} aus {page_title}",
+            "source_type": "confluence",
+            "doc_type": "confluence_table",
+            "page_id": page_id,
+            "parent_title": parent_title or "",
+            "table_index": table_index,
+            "table_complexity": True,
+            "source_url": source_url or "",
+            "labels": labels,
+            "content_hash": content_hash,
+            "transform_warnings": ["complex_table"],
+        }
+        return ConfluenceExtraDocument(
+            file_name=file_name,
+            title=metadata["title"],
+            doc_type="confluence_table",
+            body_markdown=body,
+            metadata=metadata,
+        )
+
+    def _flatten_rows(self, rows: list[list[TableCell]]) -> list[str]:
+        if not rows:
+            return ["- Keine auslesbaren Zeilen gefunden.", ""]
+
+        has_header = all(cell.is_header for cell in rows[0]) and len(rows) > 1
+        if has_header:
+            headers = [cell.text.strip() or f"Spalte {idx + 1}" for idx, cell in enumerate(rows[0])]
+            lines = []
+            for row_idx, row in enumerate(rows[1:], start=1):
+                pairs = []
+                for col_idx, cell in enumerate(row):
+                    key = headers[col_idx] if col_idx < len(headers) else f"Spalte {col_idx + 1}"
+                    value = cell.text.strip() or "(leer)"
+                    if cell.colspan > 1 or cell.rowspan > 1:
+                        value = f"{value} [span c{cell.colspan}/r{cell.rowspan}]"
+                    pairs.append(f"{key}={value}")
+                lines.append(f"- Zeile {row_idx}: " + " | ".join(pairs))
+            return lines + [""]
+
+        fallback_lines = []
+        for row_idx, row in enumerate(rows, start=1):
+            values = []
+            for col_idx, cell in enumerate(row, start=1):
+                value = cell.text.strip() or "(leer)"
+                if cell.colspan > 1 or cell.rowspan > 1:
+                    value = f"{value} [span c{cell.colspan}/r{cell.rowspan}]"
+                values.append(f"Zelle {col_idx}={value}")
+            fallback_lines.append(f"- Originalzeile {row_idx}: " + " | ".join(values))
+        return fallback_lines + [""]
 
     def _is_key_value_table(self, table: ParsedTable) -> bool:
         """Erkennt konservativ Key-Value-/Page-Properties-Tabellen."""

@@ -149,6 +149,12 @@ def main() -> int:
                 transformed = transformer.transform(page)
                 markdown = renderer.render(transformed)
                 transform_evt.event.output_count = len(markdown)
+                transform_evt.event.extra_json = {
+                    **(transform_evt.event.extra_json or {}),
+                    "warning_flags": sorted({warning.code for warning in transformed.transform_warnings}),
+                    "unsupported_macros": transformed.unsupported_macros,
+                    "output_file": str(output_path),
+                }
                 if not markdown.strip():
                     transform_evt.skipped(ReasonCode.EMPTY_AFTER_TRANSFORM, "Nach Rendering kein Text übrig")
             with audit.stage(
@@ -166,7 +172,7 @@ def main() -> int:
                 if chunk_evt.event.chunk_count == 0:
                     chunk_evt.skipped(ReasonCode.NO_CHUNKS_CREATED, "Transformiertes Markdown ist leer")
 
-            writer.write_markdown(output_path, markdown)
+            writer.write_transformed_page(output_path, markdown, transformed)
 
             output_checksum = stable_hash(markdown)
             state.pages[page.page_id] = TransformStateRecord(
@@ -236,11 +242,11 @@ def main() -> int:
         "Confluence-Transform beendet. run_id=%s seen=%s processed=%s skipped=%s failed=%s warnings=%s outputs=%s duration=%.2fs (%s)",
         manifest.run_id,
         manifest.pages_seen,
-        manifest.pages_processed,
+        sum(1 for record in manifest.records if record.status == "processed"),
         manifest.pages_skipped,
         manifest.pages_failed,
         sum(record.warning_count for record in manifest.records),
-        manifest.pages_processed,
+        sum(1 for record in manifest.records if record.status == "processed"),
         manifest.run_duration,
         manifest.run_duration_human,
     )

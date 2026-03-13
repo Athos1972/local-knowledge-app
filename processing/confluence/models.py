@@ -64,8 +64,20 @@ class ConfluenceTransformedPage:
     attachments: list[dict[str, Any]] = field(default_factory=list)
     transform_warnings: list[TransformWarning] = field(default_factory=list)
     unsupported_macros: list[str] = field(default_factory=list)
+    extra_documents: list[ConfluenceExtraDocument] = field(default_factory=list)
     content_hash: str = ""
 
     def warning_messages(self) -> list[str]:
         """Liefert die Warnungen als Liste kurzer Texte."""
         return [warning.message for warning in self.transform_warnings]
+
+
+@dataclass(slots=True)
+class ConfluenceExtraDocument:
+    """Zusätzliches, aus einer Seite extrahiertes Markdown-Artefakt."""
+
+    file_name: str
+    title: str
+    doc_type: str
+    body_markdown: str
+    metadata: dict[str, Any] = field(default_factory=dict)

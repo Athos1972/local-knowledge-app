@@ -91,6 +91,43 @@ class ConfluenceMacroTransformerTests(unittest.TestCase):
         self.assertNotIn("Fließtext als Makroname", " ".join(result.unsupported_macros))
         self.assertTrue(any(w.code == "macro_name_parse_error" for w in result.transform_warnings))
 
+    def test_unsupported_macro_unwraps_inner_text(self) -> None:
+        result = self._transform(
+            '<ac:structured-macro ac:name="unsupported">'
+            '<ac:rich-text-body><p>Geretteter Text</p></ac:rich-text-body>'
+            '</ac:structured-macro>'
+        )
+
+        self.assertIn("Geretteter Text", result.body_markdown)
+        self.assertIn("unsupported", result.unsupported_macros)
+
+    def test_nested_unsupported_macros_are_processed_recursively(self) -> None:
+        result = self._transform(
+            '<ac:structured-macro ac:name="outer">'
+            '<ac:rich-text-body>'
+            '<ac:structured-macro ac:name="inner">'
+            '<ac:rich-text-body><p>Tiefes Element</p></ac:rich-text-body>'
+            '</ac:structured-macro>'
+            '</ac:rich-text-body>'
+            '</ac:structured-macro>'
+        )
+
+        self.assertIn("Tiefes Element", result.body_markdown)
+        self.assertIn("outer", result.unsupported_macros)
+        self.assertIn("inner", result.unsupported_macros)
+
+    def test_unsupported_macro_with_table_keeps_table_transform(self) -> None:
+        result = self._transform(
+            '<ac:structured-macro ac:name="outer">'
+            '<ac:rich-text-body>'
+            '<table><tr><th>Spalte</th><th>Wert</th></tr><tr><td>A</td><td>B</td></tr></table>'
+            '</ac:rich-text-body>'
+            '</ac:structured-macro>'
+        )
+
+        self.assertTrue("| Spalte | Wert |" in result.body_markdown or "- **Spalte:** Wert" in result.body_markdown)
+        self.assertIn("outer", result.unsupported_macros)
+
 
 if __name__ == "__main__":
     unittest.main()

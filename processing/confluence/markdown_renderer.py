@@ -29,6 +29,7 @@ class MarkdownRenderer:
             "doc_type": "confluence_page",
             "tags": page.labels,
             "transform_warnings": page.warning_messages(),
+            "unsupported_macros": page.unsupported_macros,
             "parent_title": page.parent_title or "",
             "ancestors": page.ancestors,
             "page_properties": page.page_properties,

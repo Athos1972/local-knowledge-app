@@ -321,7 +321,22 @@ python scripts/audit_report.py --run-id 20260311_194512_confluence_full --markdo
 python scripts/audit_report.py --run-id 20260311_194512_confluence_full --drilldown --drilldown-format json --output reports/audit/audit_drilldown.json
 python scripts/audit_report.py --run-id 20260311_194512_confluence_full --format csv --output reports/audit/audit_drilldown.csv
 python scripts/audit_report.py --run-id 20260311_194512_confluence_full --drilldown --only-problematic --format json --output reports/audit/audit_drilldown_problematic.json
+
+
+### Confluence: Complex Tables & Unsupported Macros
+
+- Komplexe Tabellen werden als separates Markdown-Artefakt im gleichen Zielordner abgelegt (`<page_id>__<page_slug>__table_<nn>.md`).
+- In der Hauptseite bleibt ein kurzer Verweis (`[Komplexe Tabelle ausgelagert: ...]`) inklusive Strukturhinweis erhalten.
+- Nicht unterstützte Makros werden rekursiv "entpackt": Makro-Hülle wird als Warning erfasst, der innere Inhalt aber weiter transformiert (inkl. verschachtelter Makros und Tabellen).
+
+Unsupported-Macro-Report aus Transform-Outputs:
+
+```bash
+python scripts/report_unsupported_macros.py --root ~/local-knowledge-data/staging/confluence --format console
+python scripts/report_unsupported_macros.py --root ~/local-knowledge-data/staging/confluence --format json --output reports/unsupported_macros.json
+python scripts/report_unsupported_macros.py --root ~/local-knowledge-data/staging/confluence --space doc --format csv --output reports/unsupported_macros.csv
 ```
+
 
 ### Funnel lesen
 

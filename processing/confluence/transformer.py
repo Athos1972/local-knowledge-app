@@ -10,6 +10,7 @@ from processing.confluence.link_transformer import LinkTransformer
 from processing.confluence.macro_transformer import MacroTransformer
 from processing.confluence.models import ConfluenceRawPage, ConfluenceTransformedPage, TransformWarning
 from processing.confluence.table_transformer import TableTransformer
+from processing.confluence.writer import ConfluenceTransformWriter
 from sources.document import stable_hash
 
 
@@ -27,12 +28,26 @@ class ConfluenceTransformer:
     def transform(self, page: ConfluenceRawPage) -> ConfluenceTransformedPage:
         warnings: list[TransformWarning] = []
 
+        source_content_hash = stable_hash(
+            "|".join([page.title, page.body, page.updated_at or "", ",".join(page.labels)])
+        )
+
         text = page.body
         text, macro_warnings, unsupported = self.macro_transformer.transform(text)
         warnings.extend(macro_warnings)
 
-        text, table_warnings, extracted_properties, key_value_count = self.table_transformer.transform(text)
-        warnings.extend(table_warnings)
+        page_slug = ConfluenceTransformWriter._slugify(page.title)
+        text, extracted_properties, key_value_count, extra_documents = self.table_transformer.transform(
+            text,
+            page_id=page.page_id,
+            page_title=page.title,
+            page_slug=page_slug,
+            source_url=page.source_url,
+            labels=page.labels,
+            parent_title=page.parent_title,
+            content_hash=source_content_hash,
+            warnings=warnings,
+        )
         merged_page_properties = self._merge_page_properties(page.page_properties, extracted_properties)
 
         if key_value_count:
@@ -45,10 +60,6 @@ class ConfluenceTransformer:
         title_prefix = f"# {page.title}\n\n"
         body = title_prefix + text.strip()
         body += self.link_transformer.render_attachments(page.attachments)
-
-        content_hash = stable_hash(
-            "|".join([page.title, page.body, page.updated_at or "", ",".join(page.labels)])
-        )
 
         return ConfluenceTransformedPage(
             page_id=page.page_id,
@@ -67,7 +78,8 @@ class ConfluenceTransformer:
             attachments=page.attachments,
             transform_warnings=warnings,
             unsupported_macros=unsupported,
-            content_hash=content_hash,
+            extra_documents=extra_documents,
+            content_hash=source_content_hash,
         )
 
     def _merge_page_properties(self, existing: dict[str, object], extracted: dict[str, str]) -> dict[str, object]:
