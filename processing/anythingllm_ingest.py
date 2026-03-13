@@ -14,6 +14,7 @@ from common.config import AppConfig
 from common.logging_setup import get_logger
 from common.time_utils import format_duration_human
 from processing.audit import AuditStage, ReasonCode, build_audit_components
+from processing.markdown_quality import has_meaningful_markdown_content
 from processing.manifest import generate_run_id
 from sources.document import utc_now_iso
 
@@ -112,7 +113,7 @@ class DeltaPlanEntry:
     top_level_group: str
     sha256: str
     size_bytes: int
-    action: str  # new | changed | unchanged | filtered | too_large
+    action: str  # new | changed | unchanged | filtered | too_large | invalid_content
     reason_code: str | None = None
     reason_detail: str | None = None
 
@@ -406,6 +407,24 @@ def run_anythingllm_ingest(config: AnythingLLMIngestConfig) -> tuple[int, Anythi
                 manifest.records.append(_record(entry, status="skipped", reason=entry.action))
                 continue
 
+            if entry.action == "invalid_content":
+                logger.error("File rejected due to invalid markdown content. file=%s", entry.relative_path)
+                manifest.files_failed += 1
+                _touch_group(manifest, entry.top_level_group).failed += 1
+                with audit.stage(
+                    run_id=run_context.run_id,
+                    source_type="anythingllm_ingest",
+                    source_instance=config.source_instance,
+                    stage=AuditStage.FILTER,
+                    document_id=entry.relative_path,
+                    document_uri=entry.absolute_path.as_uri(),
+                    document_title=entry.absolute_path.name,
+                    extra_json={"is_dirty": None},
+                ) as filter_evt:
+                    filter_evt.error(entry.reason_code or ReasonCode.NO_MEANINGFUL_TEXT, entry.reason_detail or "Ungültiger Markdown-Inhalt")
+                manifest.records.append(_record(entry, status="error", reason=entry.reason_detail or entry.action))
+                continue
+
             if entry.action == "unchanged" and not config.force_reupload and not config.force_reembed:
                 logger.debug("File skipped unchanged by delta. file=%s", entry.relative_path)
                 manifest.files_unchanged += 1
@@ -575,6 +594,39 @@ def build_delta_plan(
                 )
             )
             continue
+
+        if ext == ".md":
+            try:
+                markdown_text = path.read_text(encoding="utf-8")
+            except OSError as exc:
+                entries.append(
+                    DeltaPlanEntry(
+                        path,
+                        rel_path,
+                        infer_top_level_group(rel_path),
+                        "",
+                        size,
+                        "invalid_content",
+                        reason_code=ReasonCode.EMPTY_DOCUMENT,
+                        reason_detail=f"Markdown-Datei konnte nicht gelesen werden: {exc}",
+                    )
+                )
+                continue
+
+            if not has_meaningful_markdown_content(markdown_text):
+                entries.append(
+                    DeltaPlanEntry(
+                        path,
+                        rel_path,
+                        infer_top_level_group(rel_path),
+                        "",
+                        size,
+                        "invalid_content",
+                        reason_code=ReasonCode.NO_MEANINGFUL_TEXT,
+                        reason_detail="Markdown-Datei enthält nur Frontmatter/Überschriften ohne inhaltlichen Body.",
+                    )
+                )
+                continue
 
         sha = sha256_file(path)
         existing = state.files.get(rel_path)

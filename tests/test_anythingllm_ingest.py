@@ -61,6 +61,20 @@ def test_file_filter_and_delta_decision(tmp_path: Path) -> None:
     assert reasons["jira/skip.pdf"] == "unsupported_file_extension"
 
 
+def test_markdown_with_only_headers_is_rejected(tmp_path: Path) -> None:
+    ingest = tmp_path / "ingest"
+    ingest.mkdir(parents=True)
+    only_header = ingest / "emptyish.md"
+    only_header.write_text("# Titel\n\n## Abschnitt\n", encoding="utf-8")
+
+    state = AnythingLLMState()
+    plan = build_delta_plan(ingest, {".md"}, 1024 * 1024, state)
+
+    assert len(plan) == 1
+    assert plan[0].action == "invalid_content"
+    assert plan[0].reason_code == "no_meaningful_text"
+
+
 def test_grouping_top_level_folder() -> None:
     assert infer_top_level_group("confluence/a/file.md") == "confluence"
     assert infer_top_level_group("jira/file.md") == "jira"

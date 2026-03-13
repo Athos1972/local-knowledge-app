@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterator
 
 from common.logging_setup import AppLogger
+from processing.markdown_quality import has_meaningful_markdown_content
 from sources.document import SourceDocument, SourceInfo, build_filesystem_doc_id
 
 logger = AppLogger.get_logger()
@@ -39,6 +40,10 @@ class FilesystemLoader:
                 stat = file_path.stat()
             except OSError as exc:
                 logger.warning("Failed reading file '%s': %s", file_path, exc)
+                continue
+
+            if not has_meaningful_markdown_content(content):
+                logger.warning("Skipping markdown file without meaningful body content: %s", file_path)
                 continue
 
             relative_path = file_path.relative_to(self.root).as_posix()
