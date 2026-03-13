@@ -13,7 +13,10 @@ def _paths(tmp_path: Path) -> ResetPaths:
         data_root=data_root,
         confluence_staging_root=data_root / "staging" / "confluence",
         scraping_staging_root=repo_root / "staging" / "transformed",
+        jira_staging_root=data_root / "staging" / "jira",
         confluence_transform_manifest_root=data_root / "system" / "confluence_transform",
+        jira_transform_manifest_root=data_root / "system" / "jira_transform",
+        ingestion_manifest_root=data_root / "system" / "manifests",
         confluence_publish_manifest_root=data_root / "system" / "confluence_publish",
         domains_root=data_root / "domains",
         reports_root=repo_root / "reports",
@@ -34,6 +37,11 @@ def test_dry_run_collects_candidates(tmp_path: Path) -> None:
     (paths.processed_root / "chunks").mkdir(parents=True)
     (paths.processed_root / "chunks" / "chunk.jsonl").write_text("{}", encoding="utf-8")
 
+    (paths.jira_staging_root / "inst-a").mkdir(parents=True)
+    (paths.jira_staging_root / "inst-a" / "issue.md").write_text("# jira", encoding="utf-8")
+    paths.ingestion_manifest_root.mkdir(parents=True)
+    (paths.ingestion_manifest_root / "latest_run_manifest.json").write_text("{}", encoding="utf-8")
+
     options = ResetOptions(
         execute=False,
         yes=False,
@@ -48,6 +56,8 @@ def test_dry_run_collects_candidates(tmp_path: Path) -> None:
     assert (paths.audit_root / "pipeline_audit.sqlite").resolve() in target_paths
     assert (paths.audit_root / "runs" / "run_a.jsonl").resolve() in target_paths
     assert (paths.processed_root / "chunks" / "chunk.jsonl").resolve() in target_paths
+    assert (paths.jira_staging_root / "inst-a" / "issue.md").resolve() in target_paths
+    assert (paths.ingestion_manifest_root / "latest_run_manifest.json").resolve() in target_paths
 
 
 def test_execute_deletes_only_within_allowed_roots(tmp_path: Path) -> None:
@@ -115,3 +125,72 @@ def test_idempotent_double_execute(tmp_path: Path) -> None:
     assert deleted_second == 0
     assert not warnings_first
     assert not warnings_second
+
+
+def test_execute_prunes_empty_staging_directories(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    jira_leaf = paths.scraping_staging_root / "jira" / "project-a" / "board-1"
+    jira_leaf.mkdir(parents=True)
+    (jira_leaf / "issue-1.md").write_text("x", encoding="utf-8")
+
+    options = ResetOptions(
+        execute=True,
+        yes=True,
+        keep_exports=False,
+        keep_anythingllm=False,
+        scopes=("staging",),
+    )
+
+    targets, _ = collect_targets(paths, options)
+    deleted, warnings = delete_targets(targets, allowed_roots=[paths.scraping_staging_root])
+
+    assert deleted == 1
+    assert not warnings
+    assert not (paths.scraping_staging_root / "jira").exists()
+    assert paths.scraping_staging_root.exists()
+
+
+def test_execute_prunes_empty_jira_staging_directories(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    jira_leaf = paths.jira_staging_root / "instance-a" / "project-x"
+    jira_leaf.mkdir(parents=True)
+    (jira_leaf / "issue-2.md").write_text("x", encoding="utf-8")
+
+    options = ResetOptions(
+        execute=True,
+        yes=True,
+        keep_exports=False,
+        keep_anythingllm=False,
+        scopes=("staging",),
+    )
+
+    targets, _ = collect_targets(paths, options)
+    deleted, warnings = delete_targets(targets, allowed_roots=[paths.jira_staging_root])
+
+    assert deleted == 1
+    assert not warnings
+    assert not (paths.jira_staging_root / "instance-a").exists()
+    assert paths.jira_staging_root.exists()
+
+
+def test_execute_prunes_empty_ingestion_manifest_directories(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    manifests_leaf = paths.ingestion_manifest_root / "runs" / "2024-01"
+    manifests_leaf.mkdir(parents=True)
+    (manifests_leaf / "run_1.json").write_text("{}", encoding="utf-8")
+
+    options = ResetOptions(
+        execute=True,
+        yes=True,
+        keep_exports=False,
+        keep_anythingllm=False,
+        scopes=("staging",),
+    )
+
+    targets, _ = collect_targets(paths, options)
+    deleted, warnings = delete_targets(targets, allowed_roots=[paths.ingestion_manifest_root])
+
+    assert deleted == 1
+    assert not warnings
+    assert not (paths.ingestion_manifest_root / "runs").exists()
+    assert paths.ingestion_manifest_root.exists()

@@ -33,7 +33,10 @@ class ResetPaths:
     data_root: Path
     confluence_staging_root: Path
     scraping_staging_root: Path
+    jira_staging_root: Path
     confluence_transform_manifest_root: Path
+    jira_transform_manifest_root: Path
+    ingestion_manifest_root: Path
     confluence_publish_manifest_root: Path
     domains_root: Path
     reports_root: Path
@@ -87,10 +90,19 @@ def load_reset_paths(repo_root: Path) -> ResetPaths:
         AppConfig.get_path(None, "scraping_transform", "output_root", default="staging/transformed"),
         repo_root=repo_root,
     )
+    jira_staging = _resolve_path(
+        AppConfig.get_path(None, "jira_transform", "output_root", default=str(data_root / "staging" / "jira")),
+        repo_root=repo_root,
+    )
     confluence_transform_manifest = _resolve_path(
         AppConfig.get_path(None, "confluence_transform", "manifests_dir", default=str(data_root / "system" / "confluence_transform")),
         repo_root=repo_root,
     )
+    jira_transform_manifest = _resolve_path(
+        AppConfig.get_path(None, "jira_transform", "manifests_dir", default=str(data_root / "system" / "jira_transform")),
+        repo_root=repo_root,
+    )
+    ingestion_manifest_root = (data_root / "system" / "manifests").resolve()
     confluence_publish_manifest = _resolve_path(
         AppConfig.get_path(None, "publish", "confluence", "manifests_dir", default=str(data_root / "system" / "confluence_publish")),
         repo_root=repo_root,
@@ -107,7 +119,10 @@ def load_reset_paths(repo_root: Path) -> ResetPaths:
         data_root=data_root,
         confluence_staging_root=confluence_staging,
         scraping_staging_root=scraping_staging,
+        jira_staging_root=jira_staging,
         confluence_transform_manifest_root=confluence_transform_manifest,
+        jira_transform_manifest_root=jira_transform_manifest,
+        ingestion_manifest_root=ingestion_manifest_root,
         confluence_publish_manifest_root=confluence_publish_manifest,
         domains_root=domains_root,
         reports_root=reports_root,
@@ -204,8 +219,11 @@ def collect_targets(paths: ResetPaths, options: ResetOptions) -> tuple[list[Dele
     if "staging" in selected:
         _add_targets(targets, "staging", _iter_files(paths.confluence_staging_root), "Confluence staging output")
         _add_targets(targets, "staging", _iter_files(paths.scraping_staging_root), "Scraping transformed output")
+        _add_targets(targets, "staging", _iter_files(paths.jira_staging_root), "Jira staging output")
         _add_targets(targets, "staging", _iter_files(paths.processed_root), "Ingestion processed artifacts")
         _add_targets(targets, "staging", _iter_files(paths.confluence_transform_manifest_root), "Confluence transform state")
+        _add_targets(targets, "staging", _iter_files(paths.jira_transform_manifest_root), "Jira transform state")
+        _add_targets(targets, "staging", _iter_files(paths.ingestion_manifest_root), "Ingestion run manifests/state")
 
     if "derived" in selected:
         _add_targets(
@@ -241,6 +259,20 @@ def _within_allowed_roots(path: Path, roots: Iterable[Path]) -> bool:
     return False
 
 
+def _prune_empty_directories(roots: Iterable[Path]) -> None:
+    for root in sorted({candidate.resolve() for candidate in roots}, key=lambda item: len(str(item)), reverse=True):
+        if not root.exists() or not root.is_dir():
+            continue
+
+        child_dirs = [path for path in root.rglob("*") if path.is_dir()]
+        for directory in sorted(child_dirs, key=lambda item: len(str(item)), reverse=True):
+            try:
+                if not any(directory.iterdir()):
+                    directory.rmdir()
+            except OSError:
+                continue
+
+
 def delete_targets(targets: list[DeletionTarget], *, allowed_roots: Iterable[Path], logger_name: str = "reset_pipeline_state") -> tuple[int, list[str]]:
     logger = get_logger(logger_name)
     deleted = 0
@@ -258,12 +290,7 @@ def delete_targets(targets: list[DeletionTarget], *, allowed_roots: Iterable[Pat
             warnings.append(f"SKIP failed delete {target.path}: {exc}")
             logger.debug("Delete failed for %s", target.path, exc_info=exc)
 
-    for root in sorted({target.path.parent for target in targets}, key=str, reverse=True):
-        try:
-            if root.exists() and not any(root.iterdir()):
-                root.rmdir()
-        except OSError:
-            continue
+    _prune_empty_directories(allowed)
 
     return deleted, warnings
 
@@ -331,8 +358,11 @@ def main() -> int:
             paths.anythingllm_root,
             paths.confluence_staging_root,
             paths.scraping_staging_root,
+            paths.jira_staging_root,
             paths.processed_root,
             paths.confluence_transform_manifest_root,
+            paths.jira_transform_manifest_root,
+            paths.ingestion_manifest_root,
             paths.domains_root,
             paths.confluence_publish_manifest_root,
             paths.reports_root,
