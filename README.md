@@ -131,6 +131,28 @@ pip install .[legacy-hf]
 
 
 
+## Pipeline-Reset (neu)
+
+Für lokale Test-/Entwicklungszyklen gibt es ein defensives Reset-Script, das Pipeline-Artefakte entfernt und den nächsten Lauf wie einen First Run vorbereitet.
+
+```bash
+python scripts/reset_pipeline_state.py --dry-run
+python scripts/reset_pipeline_state.py --execute
+python scripts/reset_pipeline_state.py --execute --yes
+python scripts/reset_pipeline_state.py --execute --yes --keep-anythingllm
+python scripts/reset_pipeline_state.py --execute --yes --scope audit,index,staging,reports,logs,anythingllm
+```
+
+Wichtig:
+- **Default ist Dry-Run** (`--execute` ist explizit erforderlich).
+- Ohne `--yes` fragt `--execute` interaktiv nach Bestätigung.
+- Rohdaten unter `exports/...` bleiben immer erhalten (auch ohne `--keep-exports`).
+- Lokaler Reset löscht **keinen** AnythingLLM-Workspace per API.
+
+Hinweis für echten Full Reset:
+
+> Für einen echten Full Reset bitte zusätzlich den AnythingLLM-Workspace im AnythingLLM-UI löschen, sonst können dort noch hochgeladene Dokumente/Vektoren liegen bleiben.
+
 ## AnythingLLM Delta-Ingest (neu)
 
 Neuer Pipeline-Step für Upload + Workspace-Embedding aus `~/local-knowledge-data/ingest` nach AnythingLLM.
