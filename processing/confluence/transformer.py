@@ -70,7 +70,7 @@ class ConfluenceTransformer:
             content_hash=content_hash,
         )
 
-    def _merge_page_properties(self, existing: dict[str, object], extracted: dict[str, str]) -> dict[str, object]:
+    def _merge_page_properties(self, existing: dict[str, object], extracted: dict[str, object]) -> dict[str, object]:
         """Ergänzt erkannte Seiteneigenschaften ohne vorhandene Werte zu überschreiben."""
         merged: dict[str, object] = dict(existing)
         for key, value in extracted.items():

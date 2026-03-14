@@ -1,0 +1,24 @@
+[frontmatter]
+# Alphabetisch sortierte Ziel-Keys für Page-Properties im Frontmatter.
+keys = [
+  "auftraggeber",
+  "auftragnehmer",
+  "auslöser",
+  "aufwand",
+  "betroffene einheiten",
+  "jira",
+  "komponente",
+  "komplexität",
+  "modul/oft",
+  "priorität",
+  "sponsoring",
+  "status",
+  "streamlead",
+  "type",
+]
+
+[frontmatter.aliases]
+prio = "priorität"
+
+[frontmatter.value_lists]
+"betroffene einheiten" = [",", ";"]

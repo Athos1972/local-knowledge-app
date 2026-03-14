@@ -62,6 +62,14 @@ def main() -> int:
     transformer = ConfluenceTransformer()
     renderer = MarkdownRenderer()
     writer = ConfluenceTransformWriter(output_root)
+    min_raw_chars = int(
+        AppConfig.get(
+            "confluence_transform",
+            "mininum_number_of_raw_characters_in_page",
+            default=AppConfig.get("confluence_transform", "minimum_number_of_raw_characters_in_page", default=0),
+        )
+        or 0
+    )
 
     state_path = manifests_dir / "latest_transform_state.json"
     latest_manifest_path = manifests_dir / "latest_transform_manifest.json"
@@ -101,6 +109,29 @@ def main() -> int:
             document_title=page.title,
         ) as load_evt:
             load_evt.event.output_count = len(page.body)
+
+        raw_char_count = len(page.body or "")
+        if raw_char_count < min_raw_chars:
+            logger.debug(
+                "Seite hatte %s Zeichen. Limit %s. Übersprungen.",
+                raw_char_count,
+                min_raw_chars,
+            )
+            manifest.pages_skipped += 1
+            manifest.records.append(
+                TransformRecord(
+                    page_id=page.page_id,
+                    title=page.title,
+                    source_ref=page.source_ref,
+                    output_file=str(output_root / "_skipped" / f"{page.page_id}.md"),
+                    source_checksum="",
+                    output_checksum="",
+                    warning_count=0,
+                    status="skipped",
+                )
+            )
+            continue
+
         source_checksum = stable_hash("|".join([page.title, page.body, page.updated_at or "", ",".join(page.labels)]))
         old = state.pages.get(page.page_id)
 

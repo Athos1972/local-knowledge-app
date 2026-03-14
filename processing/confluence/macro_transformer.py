@@ -16,6 +16,9 @@ SUPPORTED_SIMPLE = {
     "plantuml",
     "plantumlrender",
     "table-filter",
+    "table-transformer",
+    "tablechart",
+    "page-properties-report",
     "jira",
     "view-file",
 }
@@ -39,7 +42,10 @@ class MacroTransformer:
         transformed = self._replace_task_items(transformed)
         transformed = self._remove_toc_macro(transformed)
         transformed = self._replace_plantuml_macro(transformed, warnings)
-        transformed = self._unwrap_table_filter_macro(transformed, warnings)
+        transformed = self._unwrap_table_like_macro(transformed, "table-filter")
+        transformed = self._unwrap_table_like_macro(transformed, "table-transformer")
+        transformed = self._unwrap_table_like_macro(transformed, "tablechart")
+        transformed = self._remove_page_properties_report_macro(transformed)
         transformed = self._replace_jira_macro(transformed, warnings)
         transformed = self._replace_view_file_macro(transformed, warnings)
 
@@ -129,28 +135,27 @@ class MacroTransformer:
 
         return pattern.sub(repl, text)
 
-    def _unwrap_table_filter_macro(self, text: str, warnings: list[TransformWarning]) -> str:
-        """Behandelt table-filter als Hülle und reicht den Inhalt weiter."""
+    def _unwrap_table_like_macro(self, text: str, macro_name: str) -> str:
+        """Behandelt Table-Makros als Hülle und reicht den Inhalt weiter."""
         pattern = re.compile(
-            r"<ac:structured-macro[^>]*ac:name=\"table-filter\"[^>]*>(.*?)</ac:structured-macro>",
+            rf"<ac:structured-macro[^>]*ac:name=\"{re.escape(macro_name)}\"[^>]*>(.*?)</ac:structured-macro>",
             re.DOTALL,
         )
 
         def repl(match: re.Match[str]) -> str:
             block = match.group(1)
             body_match = re.search(r"<ac:rich-text-body>(.*?)</ac:rich-text-body>", block, re.DOTALL)
-            if body_match:
-                return body_match.group(1)
-            warnings.append(
-                TransformWarning(
-                    code="degraded_macro_rendering",
-                    message="table-filter konnte keinen verwertbaren Inhalt liefern.",
-                    context="table-filter",
-                )
-            )
-            return ""
+            return body_match.group(1) if body_match else ""
 
         return pattern.sub(repl, text)
+
+    def _remove_page_properties_report_macro(self, text: str) -> str:
+        """Ignoriert page-properties-report-Makros vollständig."""
+        pattern = re.compile(
+            r"<ac:structured-macro[^>]*ac:name=\"page-properties-report\"[^>]*>.*?</ac:structured-macro>",
+            re.DOTALL,
+        )
+        return pattern.sub("", text)
 
     def _replace_jira_macro(self, text: str, warnings: list[TransformWarning]) -> str:
         """Rendert Jira-Makros als lesbaren Hinweis."""
@@ -219,8 +224,8 @@ class MacroTransformer:
         def repl(match: re.Match[str]) -> str:
             block = match.group(1)
             title_match = re.search(r"<ac:parameter[^>]*ac:name=\"title\"[^>]*>(.*?)</ac:parameter>", block, re.DOTALL)
-            value = self._strip_tags(title_match.group(1)).strip() if title_match else "Unbekannt"
-            return f"**Status:** {value}"
+            value = self._strip_tags(title_match.group(1)).strip() if title_match else ""
+            return value
 
         return pattern.sub(repl, text)
 

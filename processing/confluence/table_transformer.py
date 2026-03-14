@@ -8,6 +8,7 @@ import logging
 import re
 
 from processing.confluence.models import TransformWarning
+from processing.confluence.page_property_rules import PagePropertyRules
 
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ class TableTransformResult:
 
     markdown: str
     warning: TransformWarning | None = None
-    key_value_properties: dict[str, str] = field(default_factory=dict)
+    key_value_properties: dict[str, object] = field(default_factory=dict)
 
 
 class _TableParser(HTMLParser):
@@ -117,9 +118,12 @@ class _TableParser(HTMLParser):
 class TableTransformer:
     """Klassifiziert Tabellen und rendert konservativ in Markdown."""
 
-    def transform(self, text: str) -> tuple[str, list[TransformWarning], dict[str, str], int]:
+    def __init__(self, property_rules: PagePropertyRules | None = None) -> None:
+        self.property_rules = property_rules or PagePropertyRules.load_default()
+
+    def transform(self, text: str) -> tuple[str, list[TransformWarning], dict[str, object], int]:
         warnings: list[TransformWarning] = []
-        key_value_properties: dict[str, str] = {}
+        key_value_properties: dict[str, object] = {}
         key_value_count = 0
 
         def replace_table(match: re.Match[str]) -> str:
@@ -192,7 +196,7 @@ class TableTransformer:
 
         ratio_labels = label_like_count / len(rows)
         ratio_values = non_empty_value_count / len(rows)
-        return ratio_labels >= 0.8 and ratio_values >= 0.6
+        return ratio_labels >= 0.8 and ratio_values >= 0.5
 
     def _looks_like_explicit_header_row(self, row: list[TableCell]) -> bool:
         """Erkennt tabellarische Kopfzeilen wie `Key | Value` konservativ."""
@@ -213,20 +217,33 @@ class TableTransformer:
             return False
         return bool(re.search(r"[A-Za-zÄÖÜäöüß0-9]", compact))
 
-    def _as_key_value(self, rows: list[list[TableCell]]) -> tuple[str, dict[str, str]]:
+    def _as_key_value(self, rows: list[list[TableCell]]) -> tuple[str, dict[str, object]]:
         lines = [""]
-        properties: dict[str, str] = {}
+        properties: dict[str, object] = {}
         for row in rows:
             key_raw = row[0].text.strip()
             value_raw = row[1].text.strip()
+            canonical_key = self.property_rules.canonical_key(key_raw)
+
+            if not value_raw:
+                continue
+
+            if canonical_key and canonical_key not in properties:
+                properties[canonical_key] = self.property_rules.split_value_if_list(canonical_key, value_raw)
+
+            if canonical_key and self.property_rules.is_frontmatter_key(canonical_key):
+                continue
+
             lines.append(f"- **{key_raw}:** {value_raw}")
-            normalized_key = self._normalize_frontmatter_key(key_raw)
-            if normalized_key and normalized_key not in properties and value_raw:
-                properties[normalized_key] = value_raw
+
+        if len(lines) == 1:
+            return "", properties
+
         lines.append("")
         return "\n".join(lines), properties
 
-    def _as_markdown_table(self, rows: list[list[TableCell]]) -> str:
+    @staticmethod
+    def _as_markdown_table(rows: list[list[TableCell]]) -> str:
         width = max(len(row) for row in rows)
         normalized = [row + [TableCell(text="")] * (width - len(row)) for row in rows]
 
@@ -234,26 +251,17 @@ class TableTransformer:
         body = normalized[1:] if len(normalized) > 1 else []
 
         lines = [""]
-        lines.append("| " + " | ".join(self._escape_cell(cell.text) for cell in header) + " |")
+        lines.append("| " + " | ".join(TableTransformer._escape_cell(cell.text) for cell in header) + " |")
         lines.append("| " + " | ".join(["---"] * width) + " |")
         for row in body:
-            lines.append("| " + " | ".join(self._escape_cell(cell.text) for cell in row) + " |")
+            lines.append("| " + " | ".join(TableTransformer._escape_cell(cell.text) for cell in row) + " |")
         lines.append("")
         return "\n".join(lines)
 
     @staticmethod
     def _normalize_frontmatter_key(value: str) -> str:
-        """Normalisiert einen Label-Text zu einem snake_case-Key."""
-        lowered = value.strip().lower()
-        lowered = (
-            lowered.replace("ä", "ae")
-            .replace("ö", "oe")
-            .replace("ü", "ue")
-            .replace("ß", "ss")
-        )
-        normalized = re.sub(r"[^a-z0-9\s-]", "", lowered)
-        collapsed = re.sub(r"[-\s]+", "_", normalized).strip("_")
-        return collapsed
+        """Normalisiert einen Label-Text zu einem lowercase-Key."""
+        return re.sub(r"\s+", " ", value.strip().lower())
 
     @staticmethod
     def _escape_cell(cell: str) -> str:

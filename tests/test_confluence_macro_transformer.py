@@ -91,6 +91,37 @@ class ConfluenceMacroTransformerTests(unittest.TestCase):
         self.assertNotIn("Fließtext als Makroname", " ".join(result.unsupported_macros))
         self.assertTrue(any(w.code == "macro_name_parse_error" for w in result.transform_warnings))
 
+    def test_table_transformer_and_tablechart_unwrap_without_warnings(self) -> None:
+        result = self._transform(
+            '<ac:structured-macro ac:name="table-transformer">'
+            '<ac:rich-text-body>'
+            '<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>'
+            '</ac:rich-text-body>'
+            '</ac:structured-macro>'
+            '<ac:structured-macro ac:name="tablechart">'
+            '<ac:rich-text-body>'
+            '<table><tr><th>C</th><th>D</th></tr><tr><td>3</td><td>4</td></tr></table>'
+            '</ac:rich-text-body>'
+            '</ac:structured-macro>'
+        )
+
+        self.assertIn("- **A:** B", result.body_markdown)
+        self.assertIn("- **C:** D", result.body_markdown)
+        self.assertNotIn("table-transformer", result.unsupported_macros)
+        self.assertNotIn("tablechart", result.unsupported_macros)
+
+    def test_page_properties_report_is_ignored_without_warning(self) -> None:
+        result = self._transform(
+            '<p>Start</p>'
+            '<ac:structured-macro ac:name="page-properties-report"></ac:structured-macro>'
+            '<p>Ende</p>'
+        )
+
+        self.assertIn("Start", result.body_markdown)
+        self.assertIn("Ende", result.body_markdown)
+        self.assertNotIn("page-properties-report", result.unsupported_macros)
+
+
 
 if __name__ == "__main__":
     unittest.main()

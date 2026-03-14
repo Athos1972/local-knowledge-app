@@ -12,6 +12,7 @@ separate_file_per_run = true
 input_root = "~/local-knowledge-data/exports/confluence"
 output_root = "~/local-knowledge-data/staging/confluence"
 manifests_dir = "~/local-knowledge-data/system/confluence_transform"
+mininum_number_of_raw_characters_in_page = 0
 
 [scraping_transform]
 # Default-Input für scripts/run_transform_scraping_exports.py,

@@ -7,7 +7,7 @@ from processing.confluence.transformer import ConfluenceTransformer
 
 
 class ConfluenceTableTransformerTests(unittest.TestCase):
-    def test_key_value_table_is_rendered_as_list_and_added_to_frontmatter_properties(self) -> None:
+    def test_key_value_table_moves_configured_keys_to_frontmatter_and_hides_them_in_text(self) -> None:
         page = ConfluenceRawPage(
             page_id="1",
             space_key="DOC",
@@ -16,7 +16,8 @@ class ConfluenceTableTransformerTests(unittest.TestCase):
                 "<p>Einleitung</p>"
                 "<table>"
                 "<tr><td>Status</td><td>In Arbeit</td></tr>"
-                "<tr><td>Stream</td><td>Abrechnung</td></tr>"
+                "<tr><td>Prio</td><td>Hoch</td></tr>"
+                "<tr><td>betroffene Einheiten</td><td>A, B; C</td></tr>"
                 "<tr><td>Owner</td><td>Max Mustermann</td></tr>"
                 "</table>"
             ),
@@ -26,33 +27,34 @@ class ConfluenceTableTransformerTests(unittest.TestCase):
 
         result = ConfluenceTransformer().transform(page)
 
-        self.assertIn("- **Status:** In Arbeit", result.body_markdown)
-        self.assertIn("- **Stream:** Abrechnung", result.body_markdown)
+        self.assertNotIn("- **Status:**", result.body_markdown)
+        self.assertNotIn("- **Prio:**", result.body_markdown)
+        self.assertNotIn("- **betroffene Einheiten:**", result.body_markdown)
         self.assertIn("- **Owner:** Max Mustermann", result.body_markdown)
         self.assertEqual("In Arbeit", result.page_properties["status"])
-        self.assertEqual("Abrechnung", result.page_properties["stream"])
+        self.assertEqual("Hoch", result.page_properties["priorität"])
+        self.assertEqual(["A", "B", "C"], result.page_properties["betroffene einheiten"])
         self.assertEqual("Max Mustermann", result.page_properties["owner"])
         self.assertEqual("existing_value", result.page_properties["existing_key"])
         self.assertFalse(any(w.code == "complex_table" for w in result.transform_warnings))
 
-    def test_existing_page_property_is_not_overwritten(self) -> None:
+    def test_empty_values_are_not_written_to_properties(self) -> None:
         page = ConfluenceRawPage(
             page_id="2",
             space_key="DOC",
             title="Eigenschaften",
             body=(
                 "<table>"
-                "<tr><td>Status</td><td>In Arbeit</td></tr>"
+                "<tr><td>Status</td><td></td></tr>"
                 "<tr><td>Owner</td><td>Max Mustermann</td></tr>"
                 "</table>"
             ),
             source_ref="dummy",
-            page_properties={"status": "Done"},
         )
 
         result = ConfluenceTransformer().transform(page)
 
-        self.assertEqual("Done", result.page_properties["status"])
+        self.assertNotIn("status", result.page_properties)
         self.assertEqual("Max Mustermann", result.page_properties["owner"])
 
     def test_regular_table_remains_markdown_table(self) -> None:
