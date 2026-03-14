@@ -9,4 +9,5 @@ qdrant-client
 chromadb
 python-frontmatter
 pandas
+pytest
 
