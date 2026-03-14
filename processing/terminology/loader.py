@@ -86,6 +86,12 @@ class TerminologyLoader:
     def __init__(self, config_root: Path) -> None:
         self._config_root = config_root
         self.file_names = resolve_terminology_file_names()
+        self._fallback_names = {
+            self.file_names.settings: DEFAULT_SETTINGS_FILE,
+            self.file_names.sources: DEFAULT_SOURCES_FILE,
+            self.file_names.terms: DEFAULT_TERMS_FILE,
+            self.file_names.candidate_exclude: DEFAULT_CANDIDATE_EXCLUDE_FILE,
+        }
 
     def load(self) -> TerminologyConfig:
         settings_data = self._load_yaml(self.file_names.settings)
@@ -101,7 +107,13 @@ class TerminologyLoader:
     def _load_yaml(self, filename: str) -> dict[str, Any]:
         path = self._config_root / filename
         if not path.exists():
-            raise FileNotFoundError(f"Missing terminology config file: {path}")
+            fallback_name = self._fallback_names.get(filename)
+            fallback_path = self._config_root / fallback_name if fallback_name else None
+            if fallback_name and fallback_name != filename and fallback_path and fallback_path.exists():
+                logger.warning("Configured terminology file missing (%s), falling back to %s", path, fallback_path)
+                path = fallback_path
+            else:
+                raise FileNotFoundError(f"Missing terminology config file: {path}")
         with path.open("r", encoding="utf-8") as handle:
             data = yaml.safe_load(handle) or {}
         if not isinstance(data, dict):
