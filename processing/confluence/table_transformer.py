@@ -323,22 +323,20 @@ class TableTransformer:
 
     def _is_key_value_table(self, table: ParsedTable) -> bool:
         """Erkennt konservativ Key-Value-/Page-Properties-Tabellen."""
-        rows = table.rows
-        if len(rows) < 2:
-            return False
-        if any(len(row) != 2 for row in rows):
+        projected_rows = self._project_key_value_rows(table.rows)
+        if projected_rows is None or len(projected_rows) < 2:
             return False
         if table.has_nested_table or table.has_span_complexity:
             return False
-        if any(cell.has_complex_structure for row in rows for cell in row):
+        if any(cell.has_complex_structure for row in projected_rows for cell in row):
             return False
 
-        if self._looks_like_explicit_header_row(rows[0]):
+        if self._looks_like_explicit_header_row(projected_rows[0]):
             return False
 
         label_like_count = 0
         non_empty_value_count = 0
-        for row in rows:
+        for row in projected_rows:
             label = row[0].text.strip()
             value = row[1].text.strip()
             if self._is_label_like(label):
@@ -346,9 +344,29 @@ class TableTransformer:
             if value:
                 non_empty_value_count += 1
 
-        ratio_labels = label_like_count / len(rows)
-        ratio_values = non_empty_value_count / len(rows)
+        ratio_labels = label_like_count / len(projected_rows)
+        ratio_values = non_empty_value_count / len(projected_rows)
         return ratio_labels >= 0.8 and ratio_values >= 0.6
+
+    def _project_key_value_rows(self, rows: list[list[TableCell]]) -> list[list[TableCell]] | None:
+        """Projiziert Tabellenzeilen auf Key-Value-Paare.
+
+        Unterstützt neben klassischen 2-Spalten-Tabellen auch Header-Spalten-Tabellen,
+        bei denen nach der ersten Datenspalte weitere Spalten folgen können.
+        """
+        if not rows:
+            return None
+
+        if all(len(row) == 2 for row in rows):
+            return rows
+
+        has_additional_columns = any(len(row) > 2 for row in rows)
+        if not has_additional_columns:
+            return None
+        if not all(len(row) >= 2 and row[0].is_header for row in rows):
+            return None
+
+        return [[row[0], row[1]] for row in rows]
 
     def _looks_like_explicit_header_row(self, row: list[TableCell]) -> bool:
         """Erkennt tabellarische Kopfzeilen wie `Key | Value` konservativ."""
@@ -370,10 +388,11 @@ class TableTransformer:
         return bool(re.search(r"[A-Za-zÄÖÜäöüß0-9]", compact))
 
     def _as_key_value(self, rows: list[list[TableCell]]) -> tuple[str, dict[str, str]]:
+        projected_rows = self._project_key_value_rows(rows) or rows
         lines = [""]
         properties: dict[str, str] = {}
         key_value_pairs: list[tuple[str, str]] = []
-        for row in rows:
+        for row in projected_rows:
             key_raw = row[0].text.strip()
             value_raw = row[1].text.strip()
             key_value_pairs.append((key_raw, value_raw))

@@ -124,6 +124,31 @@ class ConfluenceTableTransformerTests(unittest.TestCase):
         self.assertNotIn("- **Prio:**", result.body_markdown)
         self.assertNotIn("- **Status:**", result.body_markdown)
 
+    def test_details_table_with_header_column_uses_only_first_data_column(self) -> None:
+        page = ConfluenceRawPage(
+            page_id="5",
+            space_key="DOC",
+            title="Seiteneigenschaften mit Header-Spalte",
+            body=(
+                '<ac:structured-macro ac:name="details">'
+                '<ac:rich-text-body>'
+                "<table>"
+                "<tr><th>Status</th><td>Inhalt</td><td>blablabla</td></tr>"
+                "<tr><th>Owner</th><td>Max Mustermann</td><td>ignorieren</td></tr>"
+                "</table>"
+                "</ac:rich-text-body>"
+                "</ac:structured-macro>"
+            ),
+            source_ref="dummy",
+        )
+
+        result = ConfluenceTransformer().transform(page)
+
+        self.assertIn("- **Owner:** Max Mustermann", result.body_markdown)
+        self.assertNotIn("blablabla", result.body_markdown)
+        self.assertNotIn("ignorieren", result.body_markdown)
+        self.assertEqual("Inhalt", result.page_properties["status"])
+
 
 if __name__ == "__main__":
     unittest.main()

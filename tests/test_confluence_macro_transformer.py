@@ -158,6 +158,17 @@ class ConfluenceMacroTransformerTests(unittest.TestCase):
         self.assertNotIn("page-properties-report", result.unsupported_macros)
         self.assertFalse(any(w.code == "unsupported_macro" for w in result.transform_warnings))
 
+    def test_placeholder_macro_is_removed_completely(self) -> None:
+        result = self._transform(
+            '<p>Vorher</p>'
+            '<ac:placeholder ac:type="mention">Formulartext</ac:placeholder>'
+            '<p>Nachher</p>'
+        )
+
+        self.assertIn("Vorher", result.body_markdown)
+        self.assertIn("Nachher", result.body_markdown)
+        self.assertNotIn("Formulartext", result.body_markdown)
+
     def test_empty_nested_headings_are_removed_bottom_up(self) -> None:
         result = self._transform(
             '<h1>Top 1</h1>'
@@ -451,4 +462,3 @@ class ConfluenceMacroTransformerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
