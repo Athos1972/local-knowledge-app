@@ -166,7 +166,9 @@ def test_candidates_are_aggregated_and_counted(tmp_path: Path) -> None:
 
     service.apply_to_text("INFO BSBX123 ALPHA ALPHA", "confluence", source_ref="doc-1.md")
     service.apply_to_text("ALPHA ALPHA", "confluence", source_ref="doc-2.md")
+    report_path = service.finalize_candidate_report()
 
+    assert report_path == reports_root / "terminology_candidates.csv"
     rows = _read_candidates(reports_root / "terminology_candidates.csv")
     assert len(rows) == 1
     assert rows[0]["source_type"] == "confluence"
@@ -183,6 +185,7 @@ def test_candidates_are_aggregated_per_source(tmp_path: Path) -> None:
 
     service.apply_to_text("DELTA", "confluence", source_ref="page-1.md")
     service.apply_to_text("DELTA", "jira", source_ref="issue-1.md")
+    service.finalize_candidate_report()
 
     rows = _read_candidates(reports_root / "terminology_candidates.csv")
     assert len(rows) == 2
@@ -212,6 +215,7 @@ def test_existing_review_fields_are_preserved(tmp_path: Path) -> None:
 
     service = TerminologyService(config_root=tmp_path / "config" / "terminology", reports_root=reports_root)
     service.apply_to_text("GAMMA", "confluence", source_ref="new.md")
+    service.finalize_candidate_report()
 
     rows = _read_candidates(csv_path)
     assert len(rows) == 1
@@ -229,6 +233,7 @@ def test_excludes_are_case_insensitive_and_support_wildcards(tmp_path: Path) -> 
     service = TerminologyService(config_root=tmp_path / "config" / "terminology", reports_root=reports_root)
 
     service.apply_to_text("info API Url BSBX123 BSBX-TEST KEEP", "confluence", source_ref="d.md")
+    service.finalize_candidate_report()
 
     rows = _read_candidates(reports_root / "terminology_candidates.csv")
     assert len(rows) == 1
@@ -241,6 +246,9 @@ def test_candidate_noop_is_stable(tmp_path: Path) -> None:
     service = TerminologyService(config_root=tmp_path / "config" / "terminology", reports_root=reports_root)
 
     service.apply_to_text("ISU IS-U", "confluence", source_ref="known.md")
+    report_path = service.finalize_candidate_report()
+
+    assert report_path is None
     assert not (reports_root / "terminology_candidates.csv").exists()
 
 
@@ -289,6 +297,25 @@ terms:
     service = TerminologyService(config_root=cfg, reports_root=reports_root)
 
     service.apply_to_text("ALPHA BETA", "confluence", source_ref="page.md")
+    service.finalize_candidate_report()
 
     rows = _read_candidates(reports_root / "terminology_candidates.csv")
     assert {row["term"] for row in rows} == {"ALPHA", "BETA"}
+
+
+def test_candidate_report_is_written_on_finalize_only(tmp_path: Path) -> None:
+    _write_configs(tmp_path)
+    reports_root = tmp_path / "reports"
+    service = TerminologyService(config_root=tmp_path / "config" / "terminology", reports_root=reports_root)
+
+    service.apply_to_text("ALPHA", "confluence", source_ref="a.md")
+    service.apply_to_text("ALPHA BETA", "confluence", source_ref="b.md")
+
+    assert not (reports_root / "terminology_candidates.csv").exists()
+
+    report_path = service.finalize_candidate_report()
+
+    assert report_path == reports_root / "terminology_candidates.csv"
+    rows = _read_candidates(report_path)
+    assert {row["term"] for row in rows} == {"ALPHA", "BETA"}
+    assert next(row for row in rows if row["term"] == "ALPHA")["count"] == "2"

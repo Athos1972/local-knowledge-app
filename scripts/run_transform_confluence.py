@@ -24,6 +24,7 @@ from processing.confluence.transform_manifest import (
 from processing.confluence.transform_state import TransformState, TransformStateRecord
 from processing.confluence.transformer import ConfluenceTransformer
 from processing.confluence.writer import ConfluenceTransformWriter
+from processing.frontmatter_schema import parse_frontmatter
 from sources.confluence_export.confluence_export_loader import ConfluenceExportLoader
 from sources.document import stable_hash, utc_now_iso
 
@@ -53,6 +54,9 @@ def main() -> int:
     manifests_dir = AppConfig.get_path(None, "confluence_transform", "manifests_dir", default=str(data_root / "system" / "confluence_transform"))
 
     minimum_chars_in_raw_page = int(AppConfig.get("confluence_transform", "minimum_number_of_raw_characters_in_page", default=0) or 0)
+    minimum_chars_in_final_page = int(
+        AppConfig.get("confluence_transform", "minimum_count_characters_confluence_final_page", default=200) or 200
+    )
 
     mode = "full" if args.full_refresh else "incremental"
     effective_run_id = args.run_id or generate_transform_run_id()
@@ -222,6 +226,55 @@ def main() -> int:
                 }
                 if not markdown.strip():
                     transform_evt.skipped(ReasonCode.EMPTY_AFTER_TRANSFORM, "Nach Rendering kein Text übrig")
+
+            _frontmatter, markdown_body = parse_frontmatter(markdown)
+            final_body_char_count = len(markdown_body.strip())
+            has_complex_tables = any(document.doc_type == "confluence_table" for document in transformed.extra_documents)
+            if (
+                minimum_chars_in_final_page > 0
+                and final_body_char_count < minimum_chars_in_final_page
+                and not has_complex_tables
+            ):
+                logger.debug(
+                    "Finale Seite übersprungen: Anzahl Zeichen %s kleiner %s via Parameter minimum_count_characters_confluence_final_page.",
+                    final_body_char_count,
+                    minimum_chars_in_final_page,
+                )
+                with audit.stage(
+                    run_id=run_context.run_id,
+                    source_type="confluence",
+                    source_instance=args.source_instance,
+                    stage=AuditStage.FILTER,
+                    document_id=page.page_id,
+                    document_uri=page.source_ref,
+                    document_title=page.title,
+                    extra_json={
+                        "changed_flag": True,
+                        "is_dirty": True,
+                        "final_body_char_count": final_body_char_count,
+                        "minimum_count_characters_confluence_final_page": minimum_chars_in_final_page,
+                    },
+                ) as filter_evt:
+                    filter_evt.skipped(
+                        ReasonCode.TOO_SMALL_FOR_CHUNKING,
+                        "Finale Seite unter Mindestzeichenanzahl ohne komplexe Tabellen.",
+                    )
+
+                manifest.pages_skipped += 1
+                manifest.records.append(
+                    TransformRecord(
+                        page_id=page.page_id,
+                        title=page.title,
+                        source_ref=page.source_ref,
+                        output_file=str(output_path),
+                        source_checksum=source_checksum,
+                        output_checksum="",
+                        warning_count=len(transformed.transform_warnings),
+                        status="skipped",
+                    )
+                )
+                continue
+
             with audit.stage(
                 run_id=run_context.run_id,
                 source_type="confluence",
@@ -301,6 +354,20 @@ def main() -> int:
                 )
             )
             logger.exception("Fehler bei Seite page_id=%s: %s", page.page_id, exc)
+
+
+    logger.info("Finalisiere Terminologie-Kandidatenreport am Laufende.")
+    try:
+        report_path = transformer.finalize_terminology_report()
+        if report_path is None:
+            logger.info("Terminologie-Kandidatenreport: keine Kandidaten, nichts geschrieben.")
+        else:
+            exists_flag = report_path.exists()
+            logger.info("Terminologie-Kandidatenreport finalisiert: path=%s exists=%s", report_path, exists_flag)
+    except Exception as exc:  # noqa: BLE001
+        # Report-Schreibfehler markieren den Run bewusst als fehlerhaft, da ein erwartetes Artefakt fehlt.
+        manifest.pages_failed += 1
+        logger.exception("Fehler beim Finalisieren des Terminologie-Kandidatenreports: %s", exc)
 
     manifest.finished_at = utc_now_iso()
     manifest.run_duration = perf_counter() - started_perf

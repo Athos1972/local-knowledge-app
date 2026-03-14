@@ -37,7 +37,8 @@ Die Candidate-Erzeugung ist für **Confluence und Jira** über `sources.yml` akt
 
 ### Aggregationslogik
 
-- Kandidaten werden nicht mehr pro Dokument angehängt, sondern aggregiert geschrieben.
+- Kandidaten werden nicht mehr pro Dokument angehängt, sondern in-memory über den gesamten Run aggregiert.
+- `reports/terminology_candidates.csv` wird erst beim expliziten Finalize am Run-Ende geschrieben (einmal pro Run, auch wenn 0 Seiten verarbeitet wurden).
 - Aggregationsschlüssel: `(source_type, normalized(term))`.
 - `normalized(term)` ist case-insensitive (intern lowercased + Whitespace-Normalisierung).
 - Sichtbarer CSV-Wert `term` bleibt in der zuerst gesehenen Form erhalten.

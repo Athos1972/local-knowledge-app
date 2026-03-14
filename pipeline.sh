@@ -15,6 +15,7 @@ RUN_SCRAPING=1
 RUN_INDEX=1
 RUN_AUDIT=1
 RUN_JIRA=1
+RUN_DOCUMENTS=1
 
 JIRA_STEP_SCRIPT="scripts/run_transform_jira.py"
 if [[ ! -f "$PROJECT_ROOT/$JIRA_STEP_SCRIPT" ]]; then
@@ -37,6 +38,7 @@ Options:
   --skip-confluence      Skip Confluence transform step.
   --skip-jira            Skip JIRA transform step.
   --skip-scraping        Skip scraping transform + mapping steps.
+  --skip-documents       Skip generic documents transform step.
   --skip-index           Skip vector index build step.
   --skip-audit           Skip audit report step.
 
@@ -45,6 +47,7 @@ Options:
 Available steps for --only:
   transform-confluence
   transform-jira
+  transform-documents
   transform-scraping
   map-scraping
   ingestion
@@ -98,6 +101,10 @@ while [[ $# -gt 0 ]]; do
       RUN_JIRA=0
       shift
       ;;
+    --skip-documents)
+      RUN_DOCUMENTS=0
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -135,7 +142,7 @@ cd "$PROJECT_ROOT"
 step_exists() {
   local step="$1"
   case "$step" in
-    transform-confluence|transform-jira|transform-scraping|map-scraping|ingestion|index|audit|ingest-anythingllm)
+    transform-confluence|transform-jira|transform-documents|transform-scraping|map-scraping|ingestion|index|audit|ingest-anythingllm)
       return 0
       ;;
     *)
@@ -171,6 +178,15 @@ run_step_by_name() {
         return 0
       fi
       run_step "$step" "Transform JIRA" "$PYTHON_BIN" "$JIRA_STEP_SCRIPT"
+      ;;
+    transform-documents)
+      local documents_input_root
+      documents_input_root="$($PYTHON_BIN -c "from common.config import AppConfig; from pathlib import Path; p=AppConfig.get_path(None, 'documents_transform', 'input_root', default=str(Path.home() / 'local-knowledge-data' / 'exports' / 'documents')); print(Path(p).resolve())")"
+      if [[ ! -d "$documents_input_root" ]]; then
+        echo "[SKIP]  Transform Documents (missing input root: $documents_input_root)"
+        return 0
+      fi
+      run_step "$step" "Transform Documents" "$PYTHON_BIN" scripts/run_transform_documents.py
       ;;
     transform-scraping)
       local scraping_input_root
@@ -226,6 +242,7 @@ run_or_skip() {
     transform-confluence) label="Transform Confluence" ;;
     transform-jira) label="Transform JIRA" ;;
     transform-scraping) label="Transform Scraping" ;;
+    transform-documents) label="Transform Documents" ;;
     map-scraping) label="Map Scraping" ;;
     ingestion) label="Ingestion" ;;
     index) label="Index" ;;
@@ -271,6 +288,7 @@ echo "=== Local Knowledge Pipeline ==="
 echo "Mode: incremental"
 echo "Confluence: $([[ "$RUN_CONFLUENCE" -eq 1 ]] && echo on || echo off)"
 echo "JIRA: $([[ "$RUN_JIRA" -eq 1 ]] && echo on || echo off)"
+echo "Documents: $([[ "$RUN_DOCUMENTS" -eq 1 ]] && echo on || echo off)"
 echo "Scraping: $([[ "$RUN_SCRAPING" -eq 1 ]] && echo on || echo off)"
 echo "Index: $([[ "$RUN_INDEX" -eq 1 ]] && echo on || echo off)"
 echo "Audit: $([[ "$RUN_AUDIT" -eq 1 ]] && echo on || echo off)"
@@ -282,6 +300,7 @@ echo "Log file: $LOG_FILE"
 
 run_or_skip "$RUN_CONFLUENCE" "transform-confluence"
 run_or_skip "$RUN_JIRA" "transform-jira"
+run_or_skip "$RUN_DOCUMENTS" "transform-documents"
 run_or_skip "$RUN_SCRAPING" "transform-scraping"
 run_or_skip "$RUN_SCRAPING" "map-scraping"
 run_step_by_name "ingestion"

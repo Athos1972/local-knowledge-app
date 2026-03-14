@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import logging
 import re
+from pathlib import Path
 
 from processing.confluence.link_transformer import LinkTransformer
 from processing.confluence.macro_transformer import MacroTransformer
@@ -34,6 +35,10 @@ class ConfluenceTransformer:
         self.table_transformer = TableTransformer(self.property_promotion_rules)
         self.link_transformer = LinkTransformer()
         self.terminology_service = TerminologyService()
+
+    def finalize_terminology_report(self) -> Path | None:
+        """Finalize and write the aggregated terminology candidate report."""
+        return self.terminology_service.finalize_candidate_report()
 
     def should_ignore_page(self, page: ConfluenceRawPage) -> bool:
         """Prüft, ob eine Seite anhand ihres Titels aus der Verarbeitung ausgeschlossen wird."""

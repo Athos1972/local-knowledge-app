@@ -263,6 +263,64 @@ python scripts/import_scrape2md_export.py \
 
 Das Tool übernimmt bewusst **kein Crawling** und **keine HTML→Markdown-Konvertierung**. Es importiert Markdown-Dateien aus `pages/`, nutzt Metadaten aus `manifest.json`, setzt/aktualisiert optional Frontmatter und schreibt die Dateien in die konfigurierte Zielstruktur.
 
+
+## Documents-Transformation (Office/PDF lokal)
+
+Neuer generischer Transformationsschritt für lokale Dokument-Exporte unter `~/local-knowledge-data/exports/documents` (z. B. DOCX, XLSX, PPTX, PDF, CSV, JSON, XML, EPUB).
+
+### Erwartete Quellenstruktur
+
+```text
+exports/documents/
+  sharepoint/<collection>/...
+  book/arisca/raw/...
+```
+
+- `source_system` wird aus dem ersten Pfadsegment unterhalb von `exports/documents` abgeleitet (z. B. `sharepoint`, `book`).
+- `source_collection` wird aus dem nächsten Segment abgeleitet.
+
+### Frontmatter-Erzeugung
+
+Das YAML-Frontmatter wird **nicht** im `MarkItDownTransformer` erzeugt, sondern im documents-spezifischen Verarbeitungsschritt (Builder/Writer).
+So bleibt der Transformer austauschbar und liefert weiterhin primär Markdown + technische Metadaten.
+
+### Konfiguration (`config/app.toml`)
+
+```toml
+[documents_transform]
+input_root = "~/local-knowledge-data/exports/documents"
+output_root = "~/local-knowledge-data/staging/documents"
+publish_root = "~/local-knowledge-data/ingest/domains"
+manifests_dir = "~/local-knowledge-data/system/documents_transform"
+fallback_domain = "misc_documents"
+
+[[documents_transform.mapping]]
+match = "sharepoint/*/projektmanagement/**"
+domain = "project_management"
+
+[[documents_transform.mapping]]
+match = "sharepoint/*/architektur/**"
+domain = "architecture"
+
+[[documents_transform.mapping]]
+match = "book/arisca/**"
+domain = "arisca"
+```
+
+### Ausführung
+
+```bash
+python scripts/run_transform_documents.py
+./pipeline.sh --only transform-documents
+./pipeline.sh --skip-documents
+```
+
+Ablauf:
+1. Transformation nach `staging/documents/...`
+2. Danach Publish nach `ingest/domains/<domain>/...`
+
+Dateinamen sind stabil und kollisionsarm (`<slug>__<hash-prefix>.md`), wobei die relative Quellstruktur unterhalb der Domain soweit sinnvoll erhalten bleibt.
+
 ## Scraping-Asset Transformationspipeline (neu)
 
 Für bereits gescrapte Dateien unter `exports/scraping/...` gibt es nun einen getrennten, manifestgetriebenen Zwei-Stufen-Flow:
@@ -369,6 +427,7 @@ Confluence-Tasks bleiben im Markdown erhalten, werden aber für bessere Nutzbark
 - getrennte Abschnitte: `## Open Tasks` und `## Completed Tasks`
 - Mentions/Assignees bleiben sichtbar (z. B. `Mentions: Franzi.`)
 - keine pauschale Mindestlänge als Ausschlussregel
+- Konfigurierbarer Final-Body-Filter: `confluence_transform.minimum_count_characters_confluence_final_page` (Default `200`). Seiten werden **nach** der Transformation nicht als Haupt-`*.md` geschrieben, wenn der Markdown-Body (ohne Frontmatter) darunter liegt. Ausnahme: Wenn komplexe Tabellen als Extra-Dokumente erzeugt wurden, wird die Seite trotzdem geschrieben.
 - stattdessen semantische Trivialitätsprüfung (`FYI`, `ok`, `bitte prüfen` etc. werden verworfen)
 - Keep-Signale u. a.: Link, Due-Date, Entscheidungs-/Freigabesignal (`bestätigt`, `freigegeben`, `approved`, ...), Domänensignal oder kurze, aber sinntragende Fachaussage
 
