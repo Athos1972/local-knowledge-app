@@ -149,6 +149,33 @@ class ConfluenceTableTransformerTests(unittest.TestCase):
         self.assertNotIn("ignorieren", result.body_markdown)
         self.assertEqual("Inhalt", result.page_properties["status"])
 
+    def test_single_row_details_table_ignores_third_column_and_keeps_status_value(self) -> None:
+        page = ConfluenceRawPage(
+            page_id="6",
+            space_key="DOC",
+            title="Priorität",
+            body=(
+                '<ac:structured-macro ac:name="details">'
+                '<ac:rich-text-body>'
+                "<table>"
+                "<tr>"
+                "<th>Priorität</th>"
+                '<td><ac:structured-macro ac:name="status"><ac:parameter ac:name="title">SOLL</ac:parameter></ac:structured-macro></td>'
+                "<td>Bitte aus der 3. Spalte das passende Widget in die 2. Spalte kopieren.</td>"
+                "</tr>"
+                "</table>"
+                "</ac:rich-text-body>"
+                "</ac:structured-macro>"
+            ),
+            source_ref="dummy",
+        )
+
+        result = ConfluenceTransformer().transform(page)
+
+        self.assertNotIn("| Priorität |", result.body_markdown)
+        self.assertNotIn("Bitte aus der 3. Spalte", result.body_markdown)
+        self.assertEqual("SOLL", result.page_properties["priorität"])
+
 
 if __name__ == "__main__":
     unittest.main()

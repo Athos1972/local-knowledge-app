@@ -55,7 +55,8 @@ SUPPORTED_SIMPLE = {
     "toc",
     "plantuml",
     "plantumlrender",
-    "table-filter",
+    "table-filter",+
+    'u7'
     "tablefilter",
     "table-chart",
     "tablechart",
@@ -171,8 +172,8 @@ class MacroTransformer:
         for macro in SUPPORTED_CALLOUTS:
             transformed = self._replace_callout_macro(transformed, macro)
 
-        transformed = self._replace_expand_details_macro(transformed)
         transformed = self._replace_status_macro(transformed)
+        transformed = self._replace_expand_details_macro(transformed)
         transformed = self._replace_task_items(transformed)
         transformed = self._remove_toc_macro(transformed)
         transformed = self._remove_placeholder_macro(transformed)
