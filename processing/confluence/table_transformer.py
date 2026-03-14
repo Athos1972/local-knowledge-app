@@ -324,7 +324,7 @@ class TableTransformer:
     def _is_key_value_table(self, table: ParsedTable) -> bool:
         """Erkennt konservativ Key-Value-/Page-Properties-Tabellen."""
         projected_rows = self._project_key_value_rows(table.rows)
-        if projected_rows is None or len(projected_rows) < 2:
+        if projected_rows is None or not projected_rows:
             return False
         if table.has_nested_table or table.has_span_complexity:
             return False
