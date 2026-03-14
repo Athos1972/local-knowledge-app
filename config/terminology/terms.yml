@@ -6,7 +6,11 @@ terms:
     term_class: process
     aliases: []
     relations: []
-    applies_to: [confluence, jira, mail, teams]
+    applies_to:
+      - confluence
+      - jira
+      - mail
+      - teams
     annotate_policy: first_occurrence
     block_policy: include
     case_sensitive: false
@@ -17,9 +21,14 @@ terms:
     label: PSP-Element im Projektkontext
     description: Arbeitspaket-Knoten im Projektstrukturplan.
     term_class: process
-    aliases: [PSP AP]
+    aliases:
+      - PSP AP
     relations: []
-    applies_to: [confluence, jira, mail, teams]
+    applies_to:
+      - confluence
+      - jira
+      - mail
+      - teams
     annotate_policy: first_occurrence
     block_policy: include
     case_sensitive: false
@@ -30,9 +39,14 @@ terms:
     label: SAP Industry Solution Utilities
     description: Utilities-spezifische SAP-Lösung.
     term_class: system
-    aliases: [IS-U]
+    aliases:
+      - IS-U
     relations: []
-    applies_to: [confluence, jira, mail, teams]
+    applies_to:
+      - confluence
+      - jira
+      - mail
+      - teams
     annotate_policy: first_occurrence
     block_policy: include
     case_sensitive: false
@@ -46,8 +60,12 @@ terms:
     aliases: []
     relations:
       - type: related_to
-        target: ponton
-    applies_to: [confluence, jira, mail, teams]
+        target_term_id: ponton
+    applies_to:
+      - confluence
+      - jira
+      - mail
+      - teams
     annotate_policy: first_occurrence
     block_policy: include
     case_sensitive: false
@@ -61,8 +79,12 @@ terms:
     aliases: []
     relations:
       - type: related_to
-        target: eda
-    applies_to: [confluence, jira, mail, teams]
+        target_term_id: eda
+    applies_to:
+      - confluence
+      - jira
+      - mail
+      - teams
     annotate_policy: first_occurrence
     block_policy: include
     case_sensitive: false
@@ -73,12 +95,15 @@ terms:
     label: Max Müller
     description: Beispiel-Personenkürzel, in V1 ohne In-Text-Annotation.
     term_class: person
-    aliases: [M. Müller]
+    aliases:
+      - M. Müller
     relations:
       - type: abbreviation_of
-        target: maxmueller_name
-    applies_to: [confluence, jira]
-    annotate_policy: first_occurrence
+        target_term_id: maxmueller_name
+    applies_to:
+      - confluence
+      - jira
+    annotate_policy: never
     block_policy: exclude
     case_sensitive: false
     priority: 90
@@ -90,8 +115,10 @@ terms:
     term_class: person
     aliases: []
     relations: []
-    applies_to: [confluence, jira]
-    annotate_policy: first_occurrence
+    applies_to:
+      - confluence
+      - jira
+    annotate_policy: never
     block_policy: exclude
     case_sensitive: false
     priority: 91

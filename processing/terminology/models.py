@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 class TerminologyRelation:
     relation_type: str
     target_id: str
+    target_label: str | None = None
+    note: str | None = None
 
 
 @dataclass(slots=True)
@@ -29,6 +31,7 @@ class TerminologyTerm:
 class SourceMode:
     mode: str
     candidates_enabled: bool = False
+    enabled: bool | None = None
 
 
 @dataclass(slots=True)
