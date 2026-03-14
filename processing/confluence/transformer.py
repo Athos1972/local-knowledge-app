@@ -16,6 +16,7 @@ from processing.confluence.page_properties import (
 from processing.confluence.table_transformer import TableTransformer
 from processing.confluence.writer import ConfluenceTransformWriter
 from sources.document import stable_hash
+from processing.terminology import TerminologyService
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ class ConfluenceTransformer:
         self.property_promotion_rules = load_property_promotion_rules()
         self.table_transformer = TableTransformer(self.property_promotion_rules)
         self.link_transformer = LinkTransformer()
+        self.terminology_service = TerminologyService()
 
     def transform(self, page: ConfluenceRawPage) -> ConfluenceTransformedPage:
         warnings: list[TransformWarning] = []
@@ -67,11 +69,17 @@ class ConfluenceTransformer:
         body = title_prefix + text.strip()
         body += self.link_transformer.render_attachments(page.attachments)
 
+        terminology_result = self.terminology_service.apply_to_text(
+            body,
+            source_type="confluence",
+            source_ref=page.source_ref,
+        )
+
         return ConfluenceTransformedPage(
             page_id=page.page_id,
             space_key=page.space_key,
             title=page.title,
-            body_markdown=body,
+            body_markdown=terminology_result.text,
             source_ref=page.source_ref,
             source_url=page.source_url,
             created_at=page.created_at,

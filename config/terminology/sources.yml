@@ -1,0 +1,16 @@
+sources:
+  confluence:
+    mode: annotate_and_block
+    candidates_enabled: true
+  jira:
+    mode: annotate_and_block
+    candidates_enabled: true
+  mail:
+    mode: block_only
+    candidates_enabled: true
+  teams:
+    mode: block_only
+    candidates_enabled: true
+  scrape:
+    mode: off
+    candidates_enabled: false
