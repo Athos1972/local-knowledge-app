@@ -19,6 +19,9 @@ from sources.document import stable_hash
 from processing.terminology import TerminologyService
 
 
+_IGNORE_TITLE_PATTERN = re.compile(r"^log\s+\d{4}\b", flags=re.IGNORECASE)
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,6 +34,14 @@ class ConfluenceTransformer:
         self.table_transformer = TableTransformer(self.property_promotion_rules)
         self.link_transformer = LinkTransformer()
         self.terminology_service = TerminologyService()
+
+    def should_ignore_page(self, page: ConfluenceRawPage) -> bool:
+        """Prüft, ob eine Seite anhand ihres Titels aus der Verarbeitung ausgeschlossen wird."""
+        return self.should_ignore_title(page.title)
+
+    def should_ignore_title(self, title: str) -> bool:
+        """Ignoriert Log-Seiten mit Titelpräfix `Log YYYY` (case-insensitiv)."""
+        return bool(_IGNORE_TITLE_PATTERN.match(title.strip()))
 
     def transform(self, page: ConfluenceRawPage) -> ConfluenceTransformedPage:
         warnings: list[TransformWarning] = []
@@ -63,7 +74,11 @@ class ConfluenceTransformer:
 
         text = self.link_transformer.transform(text, source_url=page.source_url)
         text = self._convert_structure(text)
+        text = self._remove_empty_headings(text)
         text = self._cleanup_whitespace(text)
+
+        task_metadata = self._extract_task_metadata(text)
+        promoted_properties.update(task_metadata)
 
         title_prefix = f"# {page.title}\n\n"
         body = title_prefix + text.strip()
@@ -140,8 +155,72 @@ class ConfluenceTransformer:
         output = re.sub(r"<[^>]+>", "", output)
         return html.unescape(output)
 
+
+    def _extract_task_metadata(self, text: str) -> dict[str, object]:
+        """Extract task counters/mentions from rendered Open/Completed task sections."""
+        metadata: dict[str, object] = {}
+        open_section = self._extract_section(text, "Open Tasks")
+        completed_section = self._extract_section(text, "Completed Tasks")
+
+        open_count, open_mentions = self._count_tasks_and_mentions(open_section)
+        completed_count, completed_mentions = self._count_tasks_and_mentions(completed_section)
+
+        if open_count:
+            metadata["open_task_count"] = open_count
+            metadata["open_task_mentions"] = open_mentions
+        if completed_count:
+            metadata["completed_task_count"] = completed_count
+            metadata["completed_task_mentions"] = completed_mentions
+        return metadata
+
+    def _extract_section(self, text: str, section_title: str) -> str:
+        pattern = re.compile(rf"^## {re.escape(section_title)}\n(?P<body>.*?)(?=^## |\Z)", re.MULTILINE | re.DOTALL)
+        match = pattern.search(text)
+        return match.group("body") if match else ""
+
+    def _count_tasks_and_mentions(self, section_text: str) -> tuple[int, list[str]]:
+        task_count = len(re.findall(r"^- ", section_text, flags=re.MULTILINE))
+        mentions: list[str] = []
+        for mention_line in re.findall(r"^\s*Mentions:\s*(.+?)\.\s*$", section_text, flags=re.MULTILINE):
+            for raw_name in mention_line.split(","):
+                name = raw_name.strip()
+                if name and name not in mentions:
+                    mentions.append(name)
+        return task_count, mentions
+
     def _cleanup_whitespace(self, text: str) -> str:
         cleaned = re.sub(r"\r\n?", "\n", text)
         cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
         return cleaned.strip()
+
+    def _remove_empty_headings(self, text: str) -> str:
+        output = text
+        for level in (3, 2, 1):
+            output = self._remove_empty_headings_for_level(output, level)
+        return output
+
+    def _remove_empty_headings_for_level(self, text: str, level: int) -> str:
+        heading_pattern = re.compile(r"^(#{1,6})\s+.*$")
+        target_prefix = "#" * level + " "
+        lines = text.split("\n")
+        keep_line = [True] * len(lines)
+
+        for idx, line in enumerate(lines):
+            if not line.startswith(target_prefix):
+                continue
+
+            section_end = len(lines)
+            for probe in range(idx + 1, len(lines)):
+                match = heading_pattern.match(lines[probe])
+                if not match:
+                    continue
+                if len(match.group(1)) <= level:
+                    section_end = probe
+                    break
+
+            has_content = any(lines[probe].strip() for probe in range(idx + 1, section_end))
+            if not has_content:
+                keep_line[idx] = False
+
+        return "\n".join(line for line, keep in zip(lines, keep_line) if keep)

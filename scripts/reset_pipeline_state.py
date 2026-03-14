@@ -41,6 +41,8 @@ class ResetPaths:
     domains_root: Path
     reports_root: Path
     logs_root: Path
+    scripts_logs_root: Path
+    scipts_logs_root: Path
     index_root: Path
     processed_root: Path
     audit_root: Path
@@ -113,6 +115,8 @@ def load_reset_paths(repo_root: Path) -> ResetPaths:
     )
     reports_root = (repo_root / "reports").resolve()
     logs_root = _resolve_path(AppConfig.get_path(None, "logging", "log_dir", default="logs"), repo_root=repo_root)
+    scripts_logs_root = (repo_root / "scripts" / "logs").resolve()
+    scipts_logs_root = (repo_root / "scipts" / "logs").resolve()
 
     return ResetPaths(
         repo_root=repo_root,
@@ -127,6 +131,8 @@ def load_reset_paths(repo_root: Path) -> ResetPaths:
         domains_root=domains_root,
         reports_root=reports_root,
         logs_root=logs_root,
+        scripts_logs_root=scripts_logs_root,
+        scipts_logs_root=scipts_logs_root,
         index_root=(data_root / "index").resolve(),
         processed_root=(data_root / "processed").resolve(),
         audit_root=(data_root / "system" / "audit").resolve(),
@@ -240,6 +246,8 @@ def collect_targets(paths: ResetPaths, options: ResetOptions) -> tuple[list[Dele
 
     if "logs" in selected:
         _add_targets(targets, "logs", _iter_files(paths.logs_root), "Repo log files")
+        _add_targets(targets, "logs", _iter_files(paths.scripts_logs_root), "Script log files")
+        _add_targets(targets, "logs", _iter_files(paths.scipts_logs_root), "Legacy/typo scipts log files")
 
     if "index" in selected:
         _add_targets(targets, "index", _iter_files(paths.index_root), "Vector index artifacts")
@@ -367,6 +375,8 @@ def main() -> int:
             paths.confluence_publish_manifest_root,
             paths.reports_root,
             paths.logs_root,
+            paths.scripts_logs_root,
+            paths.scipts_logs_root,
             paths.index_root,
         }
         deleted, warnings = delete_targets(targets, allowed_roots=allowed_roots)

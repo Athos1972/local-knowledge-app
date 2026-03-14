@@ -15,6 +15,7 @@ CANDIDATE_COLUMNS = [
     "term",
     "count",
     "first_seen_file",
+    "last_seen_file",
     "example_context",
     "already_known",
     "suggested_action",
@@ -30,6 +31,7 @@ class CandidateRow:
     term: str
     count: int
     first_seen_file: str
+    last_seen_file: str
     example_context: str
     already_known: str = "false"
     suggested_action: str = "needs_review"
@@ -39,6 +41,8 @@ class CandidateRow:
 
 
 class TerminologyCandidateReviewService:
+    """Enriches candidate rows with reviewer hints while preserving reviewer input."""
+
     def __init__(self, config_root: Path, candidates_csv: Path) -> None:
         self._config_root = config_root
         self._candidates_csv = candidates_csv
@@ -73,6 +77,7 @@ class TerminologyCandidateReviewService:
         return enriched
 
     def _read_rows(self) -> list[CandidateRow]:
+        """Load candidate rows from CSV and tolerate older files without new columns."""
         if not self._candidates_csv.exists():
             return []
         with self._candidates_csv.open("r", encoding="utf-8", newline="") as handle:
@@ -85,6 +90,7 @@ class TerminologyCandidateReviewService:
                         term=str(record.get("term", "")),
                         count=int(record.get("count", "0") or 0),
                         first_seen_file=str(record.get("first_seen_file", "")),
+                        last_seen_file=str(record.get("last_seen_file", "")),
                         example_context=str(record.get("example_context", "")),
                         already_known=str(record.get("already_known", "false") or "false"),
                         suggested_action=str(record.get("suggested_action", "needs_review") or "needs_review"),
@@ -96,6 +102,7 @@ class TerminologyCandidateReviewService:
             return rows
 
     def _write_rows(self, rows: list[CandidateRow]) -> None:
+        """Rewrite the candidates CSV using the canonical column layout."""
         self._candidates_csv.parent.mkdir(parents=True, exist_ok=True)
         with self._candidates_csv.open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=CANDIDATE_COLUMNS)

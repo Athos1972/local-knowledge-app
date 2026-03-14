@@ -105,6 +105,35 @@ def main() -> int:
             load_evt.event.output_count = len(page.body)
         output_path = writer.build_output_path(page.space_key, page.page_id, page.title)
 
+        if transformer.should_ignore_page(page):
+            logger.debug("Seite wegen Titelregel übersprungen: page_id=%s title=%s", page.page_id, page.title)
+            with audit.stage(
+                run_id=run_context.run_id,
+                source_type="confluence",
+                source_instance=args.source_instance,
+                stage=AuditStage.FILTER,
+                document_id=page.page_id,
+                document_uri=page.source_ref,
+                document_title=page.title,
+                extra_json={"changed_flag": False, "is_dirty": False},
+            ) as filter_evt:
+                filter_evt.skipped(ReasonCode.FILTERED_BY_RULE, "Log-Seite per Titelregel ignoriert")
+
+            manifest.pages_skipped += 1
+            manifest.records.append(
+                TransformRecord(
+                    page_id=page.page_id,
+                    title=page.title,
+                    source_ref=page.source_ref,
+                    output_file=str(output_path),
+                    source_checksum="",
+                    output_checksum="",
+                    warning_count=0,
+                    status="skipped",
+                )
+            )
+            continue
+
         if minimum_chars_in_raw_page > 0 and len(page.body) < minimum_chars_in_raw_page:
             logger.debug(
                 "Seite hatte %s Zeichen. Limit %s. Übersprungen.",
@@ -232,11 +261,18 @@ def main() -> int:
                 )
             )
             if transformed.transform_warnings:
+                warning_codes = [w.code for w in transformed.transform_warnings]
                 logger.warning(
                     "Seite verarbeitet mit Warnungen: page_id=%s warnings=%s",
                     page.page_id,
-                    [w.code for w in transformed.transform_warnings],
+                    warning_codes,
                 )
+                if "unsupported_macro" in warning_codes and transformed.unsupported_macros:
+                    logger.warning(
+                        "Seite mit unsupported_macro: page_id=%s macros=%s",
+                        page.page_id,
+                        sorted(set(transformed.unsupported_macros)),
+                    )
             else:
                 logger.debug("Seite verarbeitet: page_id=%s title=%s", page.page_id, page.title)
         except Exception as exc:  # noqa: BLE001

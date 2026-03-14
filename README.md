@@ -358,6 +358,24 @@ python scripts/audit_report.py --run-id 20260311_194512_confluence_full --drilld
 - In der Hauptseite bleibt ein kurzer Verweis (`[Komplexe Tabelle ausgelagert: ...]`) inklusive Strukturhinweis erhalten.
 - Nicht unterstützte Makros werden rekursiv "entpackt": Makro-Hülle wird als Warning erfasst, der innere Inhalt aber weiter transformiert (inkl. verschachtelter Makros und Tabellen).
 
+### Confluence Tasks: Open/Completed getrennt und entstört
+
+Confluence-Tasks bleiben im Markdown erhalten, werden aber für bessere Nutzbarkeit (Suche/Embeddings) strukturiert aufbereitet:
+
+- getrennte Abschnitte: `## Open Tasks` und `## Completed Tasks`
+- Mentions/Assignees bleiben sichtbar (z. B. `Mentions: Franzi.`)
+- keine pauschale Mindestlänge als Ausschlussregel
+- stattdessen semantische Trivialitätsprüfung (`FYI`, `ok`, `bitte prüfen` etc. werden verworfen)
+- Keep-Signale u. a.: Link, Due-Date, Entscheidungs-/Freigabesignal (`bestätigt`, `freigegeben`, `approved`, ...), Domänensignal oder kurze, aber sinntragende Fachaussage
+
+Zusätzlich werden für behaltene Tasks Metadaten im Confluence-Frontmatter gesetzt:
+
+- `open_task_count`, `completed_task_count`
+- `open_task_mentions`, `completed_task_mentions`
+
+Die aktuellen Signalwortlisten liegen zentral im Confluence-Makro-Transformer und können später konfigurierbar gemacht werden (z. B. YAML-basierte Listen, JSONL-Exports, Reports pro Person/Space/Status).
+
+
 Unsupported-Macro-Report aus Transform-Outputs:
 
 ```bash
@@ -454,6 +472,9 @@ Empfehlung bei neuen Regeln:
 Eine zentrale Terminologie-Engine ist für `confluence` und `jira` aktiv integriert und pro Source-Type konfigurierbar.
 
 - Konfiguration: `config/terminology/settings.yml`, `config/terminology/sources.yml`, `config/terminology/terms.yml`
+- Terminology-Dateinamen sind in `config/app.toml` überschreibbar (Defaults bleiben die obigen Dateinamen)
+- Candidate-Excludes: `config/terminology/candidate_exclude.yml` (`*`-Wildcard, case-insensitive)
 - Entwicklerdoku: `docs/terminology.md`
-- Kandidatenreport: `reports/terminology_candidates.csv`
+- Kandidatenreport: `reports/terminology_candidates.csv` (aggregiert nach `source_type` + normalisiertem `term`)
+- `count` ist die aufsummierte Trefferzahl pro Aggregat-Zeile; bestehende Review-Felder bleiben beim Merge erhalten
 

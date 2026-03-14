@@ -36,3 +36,29 @@ Aus `config/app.toml`:
 - Kleine, fokussierte Methoden mit klaren Verantwortlichkeiten.
 - Pattern-basierte Erweiterung statt monolithischer Sonderlogik.
 - Konservative Extraktion: lieber stabiler Fallback als aggressive Vermutung.
+
+
+## Task-Behandlung (Open vs Completed)
+
+Confluence-Tasks werden nicht pauschal entfernt. Stattdessen werden sie strukturiert extrahiert, klassifiziert und als eigene Abschnitte gerendert:
+
+- `## Open Tasks`
+- `## Completed Tasks`
+
+### Heuristik
+
+- **Keine harte Mindestlänge** als Keep/Drop-Regel.
+- Triviale Kommunikations-Tasks (z. B. `FYI`, `ok`, `bitte prüfen`) werden verworfen.
+- Tasks werden behalten, wenn mindestens ein Informationssignal vorliegt, z. B. Link, Due-Date, Entscheidungs-/Freigabesignal, domänenspezifischer Begriff oder sinntragende fachliche Aussage.
+- Mentions/Assignees werden separat extrahiert und im Markdown erhalten.
+
+### Metadaten
+
+Für behaltene Tasks werden zusätzliche `promoted_properties` gesetzt:
+
+- `open_task_count`
+- `completed_task_count`
+- `open_task_mentions`
+- `completed_task_mentions`
+
+Signalwortlisten sind in `macro_transformer.py` zentral gehalten und können später konfigurierbar gemacht werden.
