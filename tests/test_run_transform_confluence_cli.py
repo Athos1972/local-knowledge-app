@@ -181,3 +181,168 @@ def test_main_finalizes_terminology_report_with_zero_pages(monkeypatch, tmp_path
     assert rc == 0
     assert DummyTransformer.instances
     assert DummyTransformer.instances[0].finalize_calls == 1
+
+
+def test_main_skips_writing_final_markdown_below_min_chars(monkeypatch, tmp_path: Path) -> None:
+    from scripts import run_transform_confluence as module
+    from processing.confluence.models import ConfluenceRawPage
+
+    class OnePageLoader:
+        def __init__(self, _input_root: Path) -> None:
+            pass
+
+        def load_pages(self, space_filter: str | None = None):
+            yield ConfluenceRawPage(
+                page_id="1",
+                title="Kurzseite",
+                space_key="DOC",
+                body="A" * 500,
+                source_ref="doc-1.xml",
+                source_url="https://example.invalid/1",
+                labels=[],
+                attachments=[],
+            )
+
+    class DummyTransformer:
+        def should_ignore_page(self, page) -> bool:  # noqa: ANN001
+            return False
+
+        def transform(self, page):  # noqa: ANN001
+            from processing.confluence.models import ConfluenceTransformedPage
+
+            return ConfluenceTransformedPage(
+                page_id=page.page_id,
+                space_key=page.space_key,
+                title=page.title,
+                body_markdown="kurz",
+                source_ref=page.source_ref,
+                source_url=page.source_url,
+            )
+
+        def finalize_terminology_report(self):
+            return None
+
+    monkeypatch.setattr(module, "ConfluenceExportLoader", OnePageLoader)
+    monkeypatch.setattr(module, "ConfluenceTransformer", DummyTransformer)
+    monkeypatch.setattr(module, "generate_transform_run_id", lambda: "run-small")
+
+    config_path = tmp_path / "app.toml"
+    config_path.write_text(
+        """
+[confluence_transform]
+minimum_number_of_raw_characters_in_page = 0
+minimum_count_characters_confluence_final_page = 200
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APP_CONFIG_FILE", str(config_path))
+    module.AppConfig._config = None
+
+    input_root = tmp_path / "exports" / "confluence"
+    output_root = tmp_path / "staging" / "confluence"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_transform_confluence.py",
+            "--input-root",
+            str(input_root),
+            "--output-root",
+            str(output_root),
+            "--run-id",
+            "run-small",
+            "--full-refresh",
+        ],
+    )
+
+    rc = module.main()
+
+    assert rc == 0
+    assert not output_root.exists() or not any(output_root.rglob("*.md"))
+
+
+def test_main_writes_page_below_min_chars_when_complex_table_exists(monkeypatch, tmp_path: Path) -> None:
+    from scripts import run_transform_confluence as module
+    from processing.confluence.models import ConfluenceRawPage
+
+    class OnePageLoader:
+        def __init__(self, _input_root: Path) -> None:
+            pass
+
+        def load_pages(self, space_filter: str | None = None):
+            yield ConfluenceRawPage(
+                page_id="1",
+                title="Kurzseite mit Tabelle",
+                space_key="DOC",
+                body="A" * 500,
+                source_ref="doc-1.xml",
+                source_url="https://example.invalid/1",
+                labels=[],
+                attachments=[],
+            )
+
+    class DummyTransformer:
+        def should_ignore_page(self, page) -> bool:  # noqa: ANN001
+            return False
+
+        def transform(self, page):  # noqa: ANN001
+            from processing.confluence.models import ConfluenceExtraDocument, ConfluenceTransformedPage
+
+            return ConfluenceTransformedPage(
+                page_id=page.page_id,
+                space_key=page.space_key,
+                title=page.title,
+                body_markdown="kurz",
+                source_ref=page.source_ref,
+                source_url=page.source_url,
+                extra_documents=[
+                    ConfluenceExtraDocument(
+                        file_name="1__kurzseite-mit-tabelle__table_01.md",
+                        title="Tabelle",
+                        doc_type="confluence_table",
+                        body_markdown="Inhalt",
+                    )
+                ],
+            )
+
+        def finalize_terminology_report(self):
+            return None
+
+    monkeypatch.setattr(module, "ConfluenceExportLoader", OnePageLoader)
+    monkeypatch.setattr(module, "ConfluenceTransformer", DummyTransformer)
+    monkeypatch.setattr(module, "generate_transform_run_id", lambda: "run-small-table")
+
+    config_path = tmp_path / "app.toml"
+    config_path.write_text(
+        """
+[confluence_transform]
+minimum_number_of_raw_characters_in_page = 0
+minimum_count_characters_confluence_final_page = 200
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APP_CONFIG_FILE", str(config_path))
+    module.AppConfig._config = None
+
+    input_root = tmp_path / "exports" / "confluence"
+    output_root = tmp_path / "staging" / "confluence"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_transform_confluence.py",
+            "--input-root",
+            str(input_root),
+            "--output-root",
+            str(output_root),
+            "--run-id",
+            "run-small-table",
+            "--full-refresh",
+        ],
+    )
+
+    rc = module.main()
+
+    assert rc == 0
+    md_files = list(output_root.rglob("*.md"))
+    assert len(md_files) == 2

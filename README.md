@@ -340,6 +340,7 @@ Confluence-Tasks bleiben im Markdown erhalten, werden aber für bessere Nutzbark
 - getrennte Abschnitte: `## Open Tasks` und `## Completed Tasks`
 - Mentions/Assignees bleiben sichtbar (z. B. `Mentions: Franzi.`)
 - keine pauschale Mindestlänge als Ausschlussregel
+- Konfigurierbarer Final-Body-Filter: `confluence_transform.minimum_count_characters_confluence_final_page` (Default `200`). Seiten werden **nach** der Transformation nicht als Haupt-`*.md` geschrieben, wenn der Markdown-Body (ohne Frontmatter) darunter liegt. Ausnahme: Wenn komplexe Tabellen als Extra-Dokumente erzeugt wurden, wird die Seite trotzdem geschrieben.
 - stattdessen semantische Trivialitätsprüfung (`FYI`, `ok`, `bitte prüfen` etc. werden verworfen)
 - Keep-Signale u. a.: Link, Due-Date, Entscheidungs-/Freigabesignal (`bestätigt`, `freigegeben`, `approved`, ...), Domänensignal oder kurze, aber sinntragende Fachaussage
 
