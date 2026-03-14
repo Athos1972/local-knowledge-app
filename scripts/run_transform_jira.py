@@ -218,6 +218,21 @@ def main() -> int:
             )
             logger.exception("Fehler bei Issue issue_key=%s: %s", issue.issue_key, exc)
 
+    logger.info("Finalisiere Terminologie-Kandidatenreport am Laufende (JIRA).")
+    try:
+        report_path = transformer.finalize_terminology_report()
+        if report_path is None:
+            logger.info("Terminologie-Kandidatenreport: keine Kandidaten geschrieben (JIRA).")
+        else:
+            logger.info(
+                "Terminologie-Kandidatenreport finalisiert (JIRA): path=%s exists=%s",
+                report_path,
+                report_path.exists(),
+            )
+    except Exception as exc:  # noqa: BLE001
+        manifest.issues_failed += 1
+        logger.exception("Fehler beim Finalisieren des Terminologie-Kandidatenreports (JIRA): %s", exc)
+
     manifest.finished_at = utc_now_iso()
     manifest.run_duration = perf_counter() - started_perf
     manifest.run_duration_human = format_duration_human(manifest.run_duration)

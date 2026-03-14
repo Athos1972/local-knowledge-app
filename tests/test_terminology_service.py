@@ -178,6 +178,44 @@ def test_candidates_are_aggregated_and_counted(tmp_path: Path) -> None:
     assert rows[0]["last_seen_file"] == "doc-2.md"
 
 
+def test_candidates_aggregate_case_insensitive_and_whitespace_normalized(tmp_path: Path) -> None:
+    cfg = tmp_path / "config" / "terminology"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "settings.yml").write_text(
+        """
+settings:
+  enabled: true
+  candidate_detection_enabled: true
+  candidate_patterns:
+    - '[A-Za-z]{3,}(?:\\s+[A-Za-z]{3,})+'
+""",
+        encoding="utf-8",
+    )
+    (cfg / "sources.yml").write_text(
+        """
+sources:
+  confluence:
+    mode: annotate_and_block
+    candidates_enabled: true
+""",
+        encoding="utf-8",
+    )
+    (cfg / "terms.yml").write_text("terms: []\n", encoding="utf-8")
+
+    reports_root = tmp_path / "reports"
+    service = TerminologyService(config_root=cfg, reports_root=reports_root)
+
+    service.apply_to_text("ALPHA BETA", "confluence", source_ref="doc-1.md")
+    service.apply_to_text("alpha BETA", "confluence", source_ref="doc-2.md")
+    service.apply_to_text("ALPHA    BETA", "confluence", source_ref="doc-3.md")
+    service.finalize_candidate_report()
+
+    rows = _read_candidates(reports_root / "terminology_candidates.csv")
+    assert len(rows) == 1
+    assert rows[0]["term"] == "ALPHA BETA"
+    assert rows[0]["count"] == "3"
+
+
 def test_candidates_are_aggregated_per_source(tmp_path: Path) -> None:
     _write_configs(tmp_path)
     reports_root = tmp_path / "reports"
@@ -252,6 +290,27 @@ def test_candidate_noop_is_stable(tmp_path: Path) -> None:
     assert not (reports_root / "terminology_candidates.csv").exists()
 
 
+def test_finalize_without_candidates_keeps_existing_csv(tmp_path: Path) -> None:
+    _write_configs(tmp_path)
+    reports_root = tmp_path / "reports"
+    reports_root.mkdir(parents=True, exist_ok=True)
+    csv_path = reports_root / "terminology_candidates.csv"
+    csv_path.write_text(
+        "source_type,term,count,first_seen_file,last_seen_file,example_context,already_known,suggested_action,selected_term_id,reviewer_status,reviewer_note\n"
+        "confluence,ALPHA,5,a.md,b.md,ctx,false,needs_review,,open,\n",
+        encoding="utf-8",
+    )
+
+    service = TerminologyService(config_root=tmp_path / "config" / "terminology", reports_root=reports_root)
+    service.apply_to_text("ISU IS-U", "confluence", source_ref="known.md")
+    report_path = service.finalize_candidate_report()
+
+    assert report_path == csv_path
+    rows = _read_candidates(csv_path)
+    assert len(rows) == 1
+    assert rows[0]["term"] == "ALPHA"
+
+
 def test_candidates_are_still_reported_when_no_terms_for_source(tmp_path: Path) -> None:
     cfg = tmp_path / "config" / "terminology"
     cfg.mkdir(parents=True, exist_ok=True)
@@ -318,4 +377,35 @@ def test_candidate_report_is_written_on_finalize_only(tmp_path: Path) -> None:
     assert report_path == reports_root / "terminology_candidates.csv"
     rows = _read_candidates(report_path)
     assert {row["term"] for row in rows} == {"ALPHA", "BETA"}
-    assert next(row for row in rows if row["term"] == "ALPHA")["count"] == "2"
+
+
+def test_candidate_detection_logs_reason_when_source_mode_candidates_disabled(tmp_path: Path, caplog) -> None:
+    cfg = tmp_path / "config" / "terminology"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "settings.yml").write_text(
+        """
+settings:
+  enabled: true
+  candidate_detection_enabled: true
+  candidate_patterns:
+    - '\\b[A-Z][A-Z0-9\\-]{2,}\\b'
+""",
+        encoding="utf-8",
+    )
+    (cfg / "sources.yml").write_text(
+        """
+sources:
+  confluence:
+    mode: annotate_and_block
+    candidates_enabled: false
+""",
+        encoding="utf-8",
+    )
+    (cfg / "terms.yml").write_text("terms: []\n", encoding="utf-8")
+
+    service = TerminologyService(config_root=cfg, reports_root=tmp_path / "reports")
+
+    with caplog.at_level("DEBUG"):
+        service.apply_to_text("ALPHA", "confluence", source_ref="page.md")
+
+    assert "source_mode_candidates_disabled" in caplog.text

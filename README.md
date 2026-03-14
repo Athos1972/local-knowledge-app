@@ -63,6 +63,14 @@ ollama pull bge-m3
 
 Confluence-Transform (optional) → Publish → Ingestion → Chunking → Vector-Index → Retrieval (Keyword/Vector/Hybrid) → Prompt → optionale LLM-Antwort.
 
+## Terminologie-Kandidatenreport
+
+- Kandidaten werden pro Transform-Run (Confluence/Jira) in-memory aggregiert und erst am Run-Ende einmalig geschrieben.
+- Zielartefakt: `reports/terminology_candidates.csv` (optional überschreibbar über `[terminology] reports_dir` in `config/app.toml`).
+- Das CSV ist eine aggregierte Hitliste nach `(source_type, normalized(term))`, nicht mehr „eine Zeile pro Seite“.
+- Exclude-Patterns kommen aus `config/terminology/candidate_exclude.yml` (`*` Wildcard, case-insensitive).
+- Details zu Spalten, Merge-/Reviewer-Feld-Erhalt und Logging: `docs/terminology.md`.
+
 ## Wichtige Befehle
 
 ```bash
@@ -511,4 +519,3 @@ Eine zentrale Terminologie-Engine ist für `confluence` und `jira` aktiv integri
 - Entwicklerdoku: `docs/terminology.md`
 - Kandidatenreport: `reports/terminology_candidates.csv` (aggregiert nach `source_type` + normalisiertem `term`)
 - `count` ist die aufsummierte Trefferzahl pro Aggregat-Zeile; bestehende Review-Felder bleiben beim Merge erhalten
-

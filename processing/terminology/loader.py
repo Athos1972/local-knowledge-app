@@ -144,9 +144,14 @@ class TerminologyLoader:
             if not isinstance(source_data, dict):
                 continue
             mode = str(source_data.get("mode", "off")).strip()
+            candidates_enabled_raw = source_data.get("candidates_enabled")
+            if candidates_enabled_raw is None:
+                candidates_enabled = mode != "off"
+            else:
+                candidates_enabled = bool(candidates_enabled_raw)
             parsed[source_name] = SourceMode(
                 mode=mode,
-                candidates_enabled=bool(source_data.get("candidates_enabled", False)),
+                candidates_enabled=candidates_enabled,
                 enabled=source_data.get("enabled"),
             )
         return parsed

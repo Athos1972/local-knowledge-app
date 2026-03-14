@@ -4,15 +4,27 @@ import csv
 import fnmatch
 import logging
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 import re
 
+from common.config import AppConfig
 from processing.terminology.candidates import CANDIDATE_COLUMNS, CandidateRow
 from processing.terminology.loader import TerminologyLoader, TerminologySettings, resolve_terminology_file_names
 from processing.terminology.models import SourceMode, TerminologyResult, TerminologyTerm
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class CandidateRunStats:
+    docs_seen: int = 0
+    docs_detection_executed: int = 0
+    docs_with_candidates: int = 0
+    docs_without_candidates: int = 0
+    total_candidate_occurrences: int = 0
+    total_excluded_occurrences: int = 0
 
 
 class TerminologyService:
@@ -26,7 +38,7 @@ class TerminologyService:
     def __init__(self, config_root: Path | None = None, reports_root: Path | None = None) -> None:
         root = Path(__file__).resolve().parents[2]
         self._config_root = config_root or (root / "config" / "terminology")
-        self._reports_root = reports_root or (root / "reports")
+        self._reports_root = reports_root or self._resolve_reports_root(root)
 
         self._settings = TerminologySettings(candidate_patterns=[r"\b[A-ZÄÖÜ][A-ZÄÖÜ0-9\-]{2,}\b"])
         self._source_modes: dict[str, SourceMode] = {}
@@ -37,19 +49,54 @@ class TerminologyService:
         self._candidate_rows_loaded = False
         self._candidate_rows_by_key: dict[tuple[str, str], CandidateRow] = {}
         self._candidate_report_dirty = False
+        self._candidate_stats = CandidateRunStats()
+
+        logger.info(
+            "Terminology service initialized: config_root=%s reports_root=%s report_path=%s",
+            self._config_root.resolve(),
+            self._reports_root.resolve(),
+            self._candidate_report_path.resolve(),
+        )
+
+    @property
+    def _candidate_report_path(self) -> Path:
+        return self._reports_root / "terminology_candidates.csv"
+
+    @staticmethod
+    def _resolve_reports_root(repo_root: Path) -> Path:
+        configured = AppConfig.get("terminology", "reports_dir", default=None)
+        if configured is None:
+            return repo_root / "reports"
+        rendered = str(configured).strip()
+        if not rendered:
+            return repo_root / "reports"
+        return Path(rendered).expanduser()
 
     def apply_to_text(self, text: str, source_type: str, *, source_ref: str = "") -> TerminologyResult:
+        self._candidate_stats.docs_seen += 1
         if not self._ensure_loaded():
-            logger.info("Terminology skipped: source=%s reason=config_unavailable", source_type)
+            logger.debug(
+                "Terminology candidate detection skipped: source=%s source_ref=%s reason=config_unavailable",
+                source_type,
+                source_ref,
+            )
             return TerminologyResult(text=text)
 
         if not self._settings.enabled:
-            logger.info("Terminology skipped: source=%s reason=disabled", source_type)
+            logger.debug(
+                "Terminology candidate detection skipped: source=%s source_ref=%s reason=terminology_global_disabled",
+                source_type,
+                source_ref,
+            )
             return TerminologyResult(text=text)
 
         source_mode = self._source_modes.get(source_type)
         if source_mode is None or source_mode.mode == "off":
-            logger.info("Terminology skipped: source=%s reason=disabled", source_type)
+            logger.debug(
+                "Terminology candidate detection skipped: source=%s source_ref=%s reason=source_mode_disabled",
+                source_type,
+                source_ref,
+            )
             return TerminologyResult(text=text)
 
         scoped_terms = self._terms_for_source(source_type)
@@ -69,8 +116,21 @@ class TerminologyService:
         if scoped_terms and source_mode.mode in {"annotate_and_block", "block_only"}:
             working_text, block_added = self._append_terminology_block(working_text, mentions)
 
-        if self._settings.candidate_detection_enabled and source_mode.candidates_enabled:
+        detection_reason = "enabled"
+        if not self._settings.candidate_detection_enabled:
+            detection_reason = "global_candidate_detection_disabled"
+        elif not source_mode.candidates_enabled:
+            detection_reason = "source_mode_candidates_disabled"
+
+        if detection_reason == "enabled":
             self._update_candidate_report(text, source_type, source_ref, mentions)
+        else:
+            logger.debug(
+                "Terminology candidate detection skipped: source=%s source_ref=%s reason=%s",
+                source_type,
+                source_ref,
+                detection_reason,
+            )
 
         logger.info(
             "Terminology applied: source=%s terms_found=%s annotations=%s block_added=%s",
@@ -98,11 +158,28 @@ class TerminologyService:
             self._terms_by_id = config.terms_by_id
             self._candidate_exclude_patterns = self._load_candidate_exclude_patterns()
             self._loaded = True
+            self._log_candidate_detection_configuration()
             return True
         except Exception as exc:  # pragma: no cover - defensive runtime handling
             logger.warning("Terminology disabled due to configuration error: %s", exc)
             self._loaded = False
             return False
+
+    def _log_candidate_detection_configuration(self) -> None:
+        logger.info(
+            "Terminology loaded: enabled=%s candidate_detection_enabled=%s report_path=%s",
+            self._settings.enabled,
+            self._settings.candidate_detection_enabled,
+            self._candidate_report_path.resolve(),
+        )
+        for source_name in sorted(self._source_modes):
+            mode = self._source_modes[source_name]
+            logger.info(
+                "Terminology source mode: source=%s mode=%s candidates_enabled=%s",
+                source_name,
+                mode.mode,
+                mode.candidates_enabled,
+            )
 
     def _terms_for_source(self, source_type: str) -> dict[str, TerminologyTerm]:
         return {
@@ -209,6 +286,7 @@ class TerminologyService:
         mentions: dict[str, list[re.Match[str]]],
     ) -> None:
         """Merge current document candidates into the in-memory aggregated candidate report."""
+        self._candidate_stats.docs_detection_executed += 1
         self._ensure_candidate_rows_loaded()
         known = {m.group(0).lower() for matches in mentions.values() for m in matches}
         candidate_counts: Counter[str] = Counter()
@@ -230,6 +308,14 @@ class TerminologyService:
                 candidate_examples.setdefault(candidate, self._extract_context(text, match.start(), match.end()))
 
         if not candidate_counts:
+            self._candidate_stats.docs_without_candidates += 1
+            self._candidate_stats.total_excluded_occurrences += excluded_terms
+            logger.debug(
+                "Terminology candidate detection executed: source=%s source_ref=%s candidates=0 excluded=%s",
+                source_type,
+                source_ref,
+                excluded_terms,
+            )
             logger.info(
                 "terminology candidates updated: source=%s new_terms=0 merged_terms=0 excluded_terms=%s pending_rows=%s",
                 source_type,
@@ -240,6 +326,9 @@ class TerminologyService:
 
         new_terms = 0
         merged_terms = 0
+        self._candidate_stats.docs_with_candidates += 1
+        self._candidate_stats.total_candidate_occurrences += sum(candidate_counts.values())
+        self._candidate_stats.total_excluded_occurrences += excluded_terms
         for term, count in sorted(candidate_counts.items()):
             key = (source_type, self._normalize_candidate_term(term))
             row = self._candidate_rows_by_key.get(key)
@@ -274,6 +363,13 @@ class TerminologyService:
             )
 
         self._candidate_report_dirty = True
+        logger.debug(
+            "Terminology candidate detection executed: source=%s source_ref=%s candidates=%s excluded=%s",
+            source_type,
+            source_ref,
+            sum(candidate_counts.values()),
+            excluded_terms,
+        )
         logger.info(
             "terminology candidates updated: source=%s new_terms=%s merged_terms=%s excluded_terms=%s pending_rows=%s",
             source_type,
@@ -289,14 +385,21 @@ class TerminologyService:
         Returns the report path when a CSV has been written, otherwise ``None``.
         """
         self._ensure_candidate_rows_loaded()
-        path = self._reports_root / "terminology_candidates.csv"
+        path = self._candidate_report_path
         rows = sorted(
             self._candidate_rows_by_key.values(),
             key=lambda row: (row.source_type, self._normalize_candidate_term(row.term), row.term),
         )
 
         if not rows:
-            logger.info("Terminology report finalization skipped: no candidates to write.")
+            if path.exists():
+                logger.info(
+                    "Terminology report finalization: no new candidates found; keeping existing file at %s",
+                    path.resolve(),
+                )
+            else:
+                logger.info("Terminology report finalization skipped: no candidates to write at %s", path.resolve())
+            self._log_finalize_totals(None)
             return None
 
         if not self._candidate_report_dirty and path.exists():
@@ -306,14 +409,32 @@ class TerminologyService:
         self._reports_root.mkdir(parents=True, exist_ok=True)
         self._write_candidate_rows(path, rows)
         self._candidate_report_dirty = False
-        logger.info("Terminology report written: path=%s rows=%s", path, len(rows))
+        self._log_finalize_totals(path)
+        logger.info("Terminology report written: path=%s rows=%s", path.resolve(), len(rows))
         return path
+
+    def _log_finalize_totals(self, report_path: Path | None) -> None:
+        logger.info(
+            (
+                "Terminology candidate summary: docs_seen=%s docs_detection_executed=%s "
+                "docs_with_candidates=%s docs_without_candidates=%s unique_candidates=%s "
+                "aggregated_candidate_occurrences=%s excluded_occurrences=%s report_path=%s"
+            ),
+            self._candidate_stats.docs_seen,
+            self._candidate_stats.docs_detection_executed,
+            self._candidate_stats.docs_with_candidates,
+            self._candidate_stats.docs_without_candidates,
+            len(self._candidate_rows_by_key),
+            self._candidate_stats.total_candidate_occurrences,
+            self._candidate_stats.total_excluded_occurrences,
+            str((report_path or self._candidate_report_path).resolve()),
+        )
 
     def _ensure_candidate_rows_loaded(self) -> None:
         if self._candidate_rows_loaded:
             return
 
-        path = self._reports_root / "terminology_candidates.csv"
+        path = self._candidate_report_path
         for row in self._read_candidate_rows(path):
             key = (row.source_type, self._normalize_candidate_term(row.term))
             self._candidate_rows_by_key[key] = row

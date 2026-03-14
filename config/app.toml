@@ -117,8 +117,10 @@ allowed_extensions = ".md,.txt,.json,.html,.csv"
 # Maximale Dateigröße pro Upload in MB (größere Dateien werden übersprungen).
 max_file_size_mb = 20
 
-[terminology.files]
+[terminology]
+reports_dir = "reports"
 
+[terminology.files]
 settings = "settings_local.yml"
 sources = "sources_local.yml"
 terms = "terms_local.yml"

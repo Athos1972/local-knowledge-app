@@ -22,6 +22,10 @@ class JiraTransformer:
         self._transform_router = TransformRouter()
         self._terminology_service = TerminologyService()
 
+    def finalize_terminology_report(self) -> Path | None:
+        """Finalize and write the aggregated terminology candidate report."""
+        return self._terminology_service.finalize_candidate_report()
+
     def transform(self, issue: JiraRawIssue) -> JiraTransformedIssue:
         warnings: list[TransformWarning] = []
 

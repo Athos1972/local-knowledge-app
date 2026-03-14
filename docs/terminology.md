@@ -31,9 +31,15 @@ python scripts/validate_terminology.py --config-dir config/terminology --format 
 
 ## Kandidaten-Review (CSV-first)
 
-Datei: `reports/terminology_candidates.csv`
+Datei: `reports/terminology_candidates.csv` (oder explizit via `config/app.toml` unter `[terminology] reports_dir`)
 
 Die Candidate-Erzeugung ist für **Confluence und Jira** über `sources.yml` aktiviert (`candidates_enabled: true`).
+
+Wichtig:
+
+- Es gibt nur noch **einen** Schreibpfad: in-memory Aggregation pro Run und genau ein CSV-Write beim Finalize.
+- Confluence- und Jira-Transform finalisieren den Report explizit am Run-Ende.
+- Falls `candidates_enabled` in `sources.yml` fehlt, wird defensiv `mode != off` als Default verwendet.
 
 ### Aggregationslogik
 
@@ -58,6 +64,33 @@ Beim nächsten Lauf wird eine vorhandene CSV eingelesen und gemerged:
   - `selected_term_id`
   - `reviewer_status`
   - `reviewer_note`
+
+Legacy-CSV-Format (z. B. ohne `last_seen_file`) wird defensiv eingelesen; beim nächsten Write entsteht automatisch das neue, vollständige Spaltenlayout.
+
+### Logging / Diagnose
+
+Beim Start (INFO):
+
+- Terminology geladen / nicht geladen
+- globales `candidate_detection_enabled`
+- Source-Mode + `candidates_enabled` je Source
+- absoluter Zielpfad des Candidate-Reports
+
+Während des Laufs (DEBUG):
+
+- Candidate-Erkennung pro Dokument ausgeführt ja/nein
+- falls nein: expliziter Grund (`config_unavailable`, `terminology_global_disabled`, `source_mode_disabled`, `source_mode_candidates_disabled`, ...)
+- pro Dokument: erkannte und ausgeschlossene Kandidaten
+
+Am Ende (INFO):
+
+- `docs_seen`
+- `docs_detection_executed`
+- `docs_with_candidates` / `docs_without_candidates`
+- `unique_candidates`
+- `aggregated_candidate_occurrences`
+- `excluded_occurrences`
+- finaler Report-Pfad
 
 ### Spalten
 
