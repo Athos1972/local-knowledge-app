@@ -11,8 +11,6 @@ from retrieval.embedding_provider import EmbeddingProvider
 
 logger = AppLogger.get_logger()
 
-x = 123
-
 class AnswerExecutor:
     """Führt vorbereitete Answer-Payloads optional gegen ein LLM aus."""
 
