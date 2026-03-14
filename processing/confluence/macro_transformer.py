@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import html
+import logging
 import re
+from collections import Counter
+from dataclasses import dataclass
 
 from processing.confluence.models import TransformWarning
 
@@ -26,6 +30,64 @@ SUPPORTED_SIMPLE = {
     "page-properties-report",
 }
 VALID_MACRO_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
+TASK_LIST_PATTERN = re.compile(r"<ac:task-list>(.*?)</ac:task-list>", re.DOTALL | re.IGNORECASE)
+TASK_ITEM_PATTERN = re.compile(r"<ac:task>(.*?)</ac:task>", re.DOTALL | re.IGNORECASE)
+MENTION_PATTERN = re.compile(r'<ri:user[^>]*ri:display-name="([^"]+)"[^>]*/?>', re.IGNORECASE)
+URL_PATTERNS = [r'<ri:url[^>]*ri:value="([^"]+)"', r'<a[^>]*href="([^"]+)"']
+DUE_DATE_PATTERN = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+TRIVIAL_TASK_TERMS = {
+    "fyi",
+    "ok",
+    "okay",
+    "done",
+    "?",
+    "bitte ansehen",
+    "siehe oben",
+    "passt",
+    "erledigt",
+    "anschauen",
+    "bitte prüfen",
+    "prüfen",
+}
+DECISION_SIGNALS = {
+    "bestätigt",
+    "freigegeben",
+    "genehmigt",
+    "reviewed",
+    "approved",
+    "abgenommen",
+    "entschieden",
+    "akzeptiert",
+}
+DOMAIN_SIGNALS = {
+    "architektur",
+    "schnittstelle",
+    "integration",
+    "s/4",
+    "utilities",
+    "emma",
+    "cr",
+    "review",
+    "abnahme",
+    "freigabe",
+    "entscheidung",
+}
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class ConfluenceTaskItem:
+    raw_text: str
+    cleaned_text: str
+    status: str
+    assignees: list[str]
+    links: list[str]
+    due_date: str | None
+    contains_decision_signal: bool
+    contains_domain_signal: bool
+    keep_reason: str = ""
+    drop_reason: str = ""
 
 
 class MacroTransformer:
@@ -146,9 +208,8 @@ class MacroTransformer:
         )
         return pattern.sub("", text)
 
-
     def _remove_page_properties_report_macro(self, text: str) -> str:
-        """Entfernt page-properties-report-Makros vollständig ohne Warnung."""
+        """Entfernt page-properties-report-Makros, Inhalt wird separat über Tabellen verarbeitet."""
         pattern = re.compile(
             r"<ac:structured-macro[^>]*ac:name=\"page-properties-report\"[^>]*>.*?</ac:structured-macro>",
             re.DOTALL,
@@ -156,7 +217,7 @@ class MacroTransformer:
         return pattern.sub("", text)
 
     def _replace_plantuml_macro(self, text: str, warnings: list[TransformWarning]) -> str:
-        """Erhält PlantUML-Inhalt als fenced Codeblock."""
+        """Rendert PlantUML-Makros als fenced code block."""
         pattern = re.compile(
             r"<ac:structured-macro[^>]*ac:name=\"(?:plantuml|plantumlrender)\"[^>]*>(.*?)</ac:structured-macro>",
             re.DOTALL,
@@ -164,25 +225,22 @@ class MacroTransformer:
 
         def repl(match: re.Match[str]) -> str:
             block = match.group(1)
-            plain_text_match = re.search(r"<ac:plain-text-body><!\[CDATA\[(.*?)\]\]></ac:plain-text-body>", block, re.DOTALL)
-            if plain_text_match:
-                source = plain_text_match.group(1).strip()
-                if source:
-                    return f"\n```plantuml\n{source}\n```\n"
-
-            warnings.append(
-                TransformWarning(
-                    code="degraded_macro_rendering",
-                    message="PlantUML-Inhalt konnte nicht vollständig extrahiert werden.",
-                    context="plantuml",
+            body_match = re.search(r"<ac:plain-text-body><!\[CDATA\[(.*?)\]\]></ac:plain-text-body>", block, re.DOTALL)
+            if not body_match:
+                warnings.append(
+                    TransformWarning(
+                        code="degraded_macro_rendering",
+                        message="PlantUML-Makro ohne lesbaren CDATA-Body erkannt.",
+                        context="plantuml",
+                    )
                 )
-            )
-            return "\n[PLANTUML_BLOCK]\nPlantUML-Inhalt konnte nicht vollständig extrahiert werden.\n"
+                return "\n[PLANTUML_BLOCK]\nPlantUML-Inhalt konnte nicht extrahiert werden.\n"
+            return f"\n```plantuml\n{body_match.group(1).strip()}\n```\n"
 
         return pattern.sub(repl, text)
 
     def _unwrap_table_like_macro(self, text: str, macro_name: str) -> str:
-        """Behandelt tabellenbezogene Makros als Hülle und reicht den Inhalt weiter."""
+        """Entfernt Wrapper-Makros um Tabellen und lässt den Rich-Text-Inhalt stehen."""
         pattern = re.compile(
             rf"<ac:structured-macro[^>]*ac:name=\"{re.escape(macro_name)}\"[^>]*>(.*?)</ac:structured-macro>",
             re.DOTALL,
@@ -270,15 +328,162 @@ class MacroTransformer:
         return pattern.sub(repl, text)
 
     def _replace_task_items(self, text: str) -> str:
-        text = re.sub(r"<ac:task-list>", "\n", text)
-        text = re.sub(r"</ac:task-list>", "\n", text)
-        text = re.sub(r"<ac:task>\s*", "", text)
-        text = re.sub(r"\s*</ac:task>", "\n", text)
-        text = re.sub(r"<ac:task-status>complete</ac:task-status>", "- [x] ", text)
-        text = re.sub(r"<ac:task-status>incomplete</ac:task-status>", "- [ ] ", text)
-        text = re.sub(r"<ac:task-body>", "", text)
-        text = re.sub(r"</ac:task-body>", "", text)
+        """Extract, classify and render Confluence tasks as explicit open/completed sections."""
+        all_tasks: list[ConfluenceTaskItem] = []
+
+        def repl(match: re.Match[str]) -> str:
+            block = match.group(1)
+            parsed = [self._parse_task_item(task_block) for task_block in TASK_ITEM_PATTERN.findall(block)]
+            all_tasks.extend(parsed)
+            return "\n"
+
+        transformed = TASK_LIST_PATTERN.sub(repl, text)
+        if not all_tasks:
+            return transformed
+
+        kept_tasks = [task for task in all_tasks if not task.drop_reason]
+        dropped = [task for task in all_tasks if task.drop_reason]
+        open_tasks = [task for task in kept_tasks if task.status == "open"]
+        completed_tasks = [task for task in kept_tasks if task.status == "completed"]
+        short_informative_kept = sum(1 for task in kept_tasks if len(task.cleaned_text) < 50)
+        drop_stats = Counter(task.drop_reason for task in dropped)
+        logger.debug(
+            "Confluence tasks parsed=%s open=%s completed=%s kept=%s dropped=%s short_informative_kept=%s drop_reasons=%s",
+            len(all_tasks),
+            sum(1 for task in all_tasks if task.status == "open"),
+            sum(1 for task in all_tasks if task.status == "completed"),
+            len(kept_tasks),
+            len(dropped),
+            short_informative_kept,
+            dict(drop_stats.most_common(5)),
+        )
+
+        rendered_sections: list[str] = []
+        if open_tasks:
+            rendered_sections.append("## Open Tasks\n\n" + "\n".join(self._render_task_item(task) for task in open_tasks))
+        if completed_tasks:
+            rendered_sections.append("## Completed Tasks\n\n" + "\n".join(self._render_task_item(task) for task in completed_tasks))
+        if not rendered_sections:
+            return transformed
+        return transformed.rstrip() + "\n\n" + "\n\n".join(rendered_sections) + "\n"
+
+    def _parse_task_item(self, task_block: str) -> ConfluenceTaskItem:
+        """Parse one Confluence task XML block and return normalized task metadata."""
+        status_raw = self._extract_xml_value(task_block, "ac:task-status").lower()
+        status = "completed" if status_raw == "complete" else "open"
+        body_raw = self._extract_xml_value(task_block, "ac:task-body")
+        mentions = self._extract_mentions(body_raw)
+        links = self._extract_links(body_raw)
+        due_date = self._extract_due_date(body_raw)
+        raw_text = self._html_to_text(body_raw)
+        cleaned_text = self._clean_task_text(raw_text, mentions)
+        contains_decision = self._contains_any(cleaned_text, DECISION_SIGNALS)
+        contains_domain = self._contains_any(cleaned_text, DOMAIN_SIGNALS)
+
+        task = ConfluenceTaskItem(
+            raw_text=raw_text,
+            cleaned_text=cleaned_text,
+            status=status,
+            assignees=mentions,
+            links=links,
+            due_date=due_date,
+            contains_decision_signal=contains_decision,
+            contains_domain_signal=contains_domain,
+        )
+        keep_reason, drop_reason = self._classify_task(task)
+        task.keep_reason = keep_reason
+        task.drop_reason = drop_reason
+        return task
+
+    def _extract_xml_value(self, block: str, tag: str) -> str:
+        match = re.search(rf"<{re.escape(tag)}>(.*?)</{re.escape(tag)}>", block, re.DOTALL | re.IGNORECASE)
+        return match.group(1) if match else ""
+
+    def _extract_mentions(self, body: str) -> list[str]:
+        """Extract user mentions/assignees from Confluence user tags."""
+        names = [name.strip() for name in MENTION_PATTERN.findall(body) if name.strip()]
+        deduped: list[str] = []
+        for name in names:
+            if name not in deduped:
+                deduped.append(name)
+        return deduped
+
+    def _extract_links(self, body: str) -> list[str]:
+        links: list[str] = []
+        for pattern in URL_PATTERNS:
+            for match in re.finditer(pattern, body, re.DOTALL | re.IGNORECASE):
+                url = match.group(1).strip()
+                if url and url not in links:
+                    links.append(url)
+        return links
+
+    def _extract_due_date(self, body: str) -> str | None:
+        text = self._html_to_text(body)
+        match = DUE_DATE_PATTERN.search(text)
+        return match.group(1) if match else None
+
+    def _html_to_text(self, value: str) -> str:
+        normalized = re.sub(r'<ri:user[^>]*ri:display-name="([^"]+)"[^>]*/?>', r'@\1', value, flags=re.IGNORECASE)
+        normalized = re.sub(r"<br\s*/?>", " ", normalized, flags=re.IGNORECASE)
+        stripped = re.sub(r"<[^>]+>", " ", normalized)
+        return re.sub(r"\s+", " ", html.unescape(stripped)).strip()
+
+    def _clean_task_text(self, raw_text: str, mentions: list[str]) -> str:
+        text = raw_text.strip()
+        for mention in mentions:
+            text = re.sub(rf"^@?{re.escape(mention)}[,:\s-]*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"^(?:@\w+[,:\s-]*)+", "", text)
+        text = re.sub(r"\s+", " ", text).strip(" .-")
         return text
+
+    def _contains_any(self, text: str, terms: set[str]) -> bool:
+        lower = text.lower()
+        return any(term in lower for term in terms)
+
+    def _is_semantically_trivial(self, cleaned_text: str) -> bool:
+        normalized = re.sub(r"[.!]+$", "", cleaned_text.lower()).strip()
+        return normalized in TRIVIAL_TASK_TERMS
+
+    def _has_meaningful_statement(self, cleaned_text: str) -> bool:
+        if not cleaned_text:
+            return False
+        words = [w for w in re.split(r"\s+", cleaned_text) if w]
+        if len(words) >= 3:
+            return True
+        return bool(re.search(r"\d", cleaned_text) or re.search(r"[A-Z][a-z]+", cleaned_text))
+
+    def _classify_task(self, task: ConfluenceTaskItem) -> tuple[str, str]:
+        """Classify tasks using semantic signals instead of hard minimum length thresholds."""
+        if not task.cleaned_text:
+            return "", "empty_after_cleanup"
+        if self._is_semantically_trivial(task.cleaned_text):
+            return "", "trivial_communication"
+
+        if task.links:
+            return "has_link", ""
+        if task.due_date:
+            return "has_due_date", ""
+        if task.contains_decision_signal:
+            return "decision_signal", ""
+        if task.contains_domain_signal:
+            return "domain_signal", ""
+        if task.assignees and self._has_meaningful_statement(task.cleaned_text):
+            return "assignee_with_statement", ""
+        if self._has_meaningful_statement(task.cleaned_text):
+            return "meaningful_statement", ""
+
+        return "", "insufficient_signal"
+
+    def _render_task_item(self, task: ConfluenceTaskItem) -> str:
+        lines = [f"- {task.cleaned_text}."]
+        if task.assignees:
+            lines.append(f"  Mentions: {', '.join(task.assignees)}.")
+        lines.append(f"  Status: {task.status}.")
+        if task.due_date:
+            lines.append(f"  Date: {task.due_date}.")
+        if task.links:
+            lines.append(f"  Links: {', '.join(task.links)}.")
+        return "\n".join(lines)
 
     @staticmethod
     def _strip_tags(value: str) -> str:
@@ -299,7 +504,7 @@ class MacroTransformer:
 
     def _extract_url(self, block: str) -> str | None:
         """Extrahiert eine URL aus typischen Link-Elementen innerhalb eines Makros."""
-        for pattern in [r'<ri:url[^>]*ri:value="([^"]+)"', r'<a[^>]*href="([^"]+)"']:
+        for pattern in URL_PATTERNS:
             match = re.search(pattern, block, re.DOTALL)
             if match and match.group(1).strip():
                 return match.group(1).strip()

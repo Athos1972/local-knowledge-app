@@ -17,6 +17,8 @@ Die Terminologie-Komponente verbessert die Konsistenz von Begriffen bei der Tran
 - `config/terminology/settings.yml` – globale Engine-Settings (Matching, Block-Schwelle, Kandidaten-Regex).
 - `config/terminology/sources.yml` – Aktivierung und Modus pro Source-Type.
 - `config/terminology/terms.yml` – Terminologie-Datenmodell mit Begriffen, Aliasen und Relationen.
+- Dateinamen für Terminology-YAMLs können über `config/app.toml` überschrieben werden. Defaults bleiben `settings.yml`, `sources.yml`, `terms.yml` (optional auch `candidate_exclude.yml`).
+- `config/terminology/candidate_exclude.yml` – Ignore-/Exclude-Liste für Kandidaten (`*` als Wildcard, case-insensitive).
 
 ## Validator
 
@@ -27,33 +29,69 @@ python scripts/validate_terminology.py --config-dir config/terminology --format 
 python scripts/validate_terminology.py --config-dir config/terminology --format json --strict
 ```
 
-Validiert u. a.:
-
-- YAML lesbar/strukturell gültig
-- Pflichtfelder je Term
-- eindeutige `id` und `canonical`
-- Alias-Kollisionen zwischen Terms
-- Referenzziele in Relationen (`target_term_id`, `target_id`, `target`)
-- erlaubte Mengen für `term_class`, `annotate_policy`, `block_policy`
-- erlaubte `applies_to` Source-Typen
-- Warnungen für Personenterms mit aktiver Annotation und potenziell mehrdeutige Kurzformen (z. B. `PM`, `CI`, `PO`)
-
 ## Kandidaten-Review (CSV-first)
 
 Datei: `reports/terminology_candidates.csv`
 
-Spalten:
+Die Candidate-Erzeugung ist für **Confluence und Jira** über `sources.yml` aktiviert (`candidates_enabled: true`).
+
+### Aggregationslogik
+
+- Kandidaten werden nicht mehr pro Dokument angehängt, sondern aggregiert geschrieben.
+- Aggregationsschlüssel: `(source_type, normalized(term))`.
+- `normalized(term)` ist case-insensitive (intern lowercased + Whitespace-Normalisierung).
+- Sichtbarer CSV-Wert `term` bleibt in der zuerst gesehenen Form erhalten.
+- `count` enthält die aufsummierte Anzahl aller Treffer innerhalb derselben Aggregat-Zeile.
+
+### Merge-Regeln bei bestehender CSV
+
+Beim nächsten Lauf wird eine vorhandene CSV eingelesen und gemerged:
+
+- `count` wird aufsummiert.
+- `first_seen_file` bleibt bestehen (nur gesetzt, wenn leer).
+- `last_seen_file` wird auf die zuletzt gesehene Quelle aktualisiert.
+- `example_context` wird nur ergänzt, wenn noch leer.
+- Review-Spalten bleiben unangetastet:
+  - `already_known`
+  - `suggested_action`
+  - `selected_term_id`
+  - `reviewer_status`
+  - `reviewer_note`
+
+### Spalten
 
 - `source_type`
 - `term`
 - `count`
 - `first_seen_file`
+- `last_seen_file`
 - `example_context`
 - `already_known`
 - `suggested_action`
 - `selected_term_id`
 - `reviewer_status`
 - `reviewer_note`
+
+### Exclude-/Ignore-Liste
+
+Konfigurationsdatei: `config/terminology/candidate_exclude.yml`
+
+Beispiel:
+
+```yaml
+candidate_exclude:
+  - INFO
+  - API
+  - URL
+  - BSBX*
+```
+
+Regeln:
+
+- Matching ist standardmäßig case-insensitive.
+- `*` matcht beliebige Zeichenfolgen (z. B. `BSBX*` matcht `BSBX123` und `BSBX-TEST`).
+- Excludes greifen **vor** Zählen und Schreiben.
+- Ausgeschlossene Kandidaten landen nicht in der CSV.
 
 CLI:
 
@@ -77,40 +115,6 @@ Import:
 python scripts/import_terminology_xlsx.py --input reports/terminology.xlsx --config-dir config/terminology --dry-run
 python scripts/import_terminology_xlsx.py --input reports/terminology.xlsx --config-dir config/terminology --backup
 ```
-
-XLSX-Sheets:
-
-1. `terms`
-2. `aliases`
-3. `relations`
-4. `sources`
-5. `candidates` (falls CSV vorhanden)
-
-Eigenschaften:
-
-- Header-Freeze, Autofilter, sinnvolle Spaltenbreite
-- Deterministisches Schreiben nach YAML
-- Dry-Run-Unterstützung und optionales Backup
-- Vor dem finalen Schreiben Validierung der importierten Daten
-
-## Neuen Begriff ergänzen
-
-1. In `config/terminology/terms.yml` einen Eintrag unter `terms:` hinzufügen.
-2. Pflichtfelder setzen: `id`, `canonical`, `label`, `description`, `term_class`.
-3. `applies_to` auf relevante Sources begrenzen.
-4. `annotate_policy` / `block_policy` setzen.
-5. Für echte Schreibvarianten `aliases` verwenden.
-6. Für fachlich verwandte Begriffe `relations` mit `type: related_to` nutzen.
-
-## Relationen: alias vs abbreviation_of vs related_to
-
-- `alias`: Praktisch gleichbedeutende Schreibvariante (z. B. `ISU` und `IS-U`).
-- `abbreviation_of`: Abkürzung referenziert eine Vollform; keine automatische Gleichsetzung mit anderen Begriffen.
-- `related_to`: Nur fachliche Verwandtschaft (z. B. `EDA` und `PONTON`), **kein Synonym**.
-
-## Warum `scrape` standardmäßig deaktiviert ist
-
-Scrape-Inhalte sind oft heterogen und enthalten viele zufällige Uppercase-Tokens. Dadurch steigt in V1 das Risiko für unerwünschte Annotationen und Kandidaten-Rauschen. Deshalb ist `scrape` in `sources.yml` auf `off` gesetzt.
 
 ## Source of Truth
 

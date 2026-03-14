@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from common.config import AppConfig
 from processing.terminology.candidates import TerminologyCandidateReviewService
 from processing.terminology.excel import TerminologyExcelService
 from processing.terminology.loader import TerminologyLoader
@@ -137,3 +138,116 @@ def test_candidates_review_basics(tmp_path: Path) -> None:
     assert known_row.suggested_action == "add_alias"
     new_row = [row for row in rows if row.term == "NEU"][0]
     assert new_row.suggested_action == "new_term"
+
+
+def test_loader_reads_file_names_from_app_toml(monkeypatch, tmp_path: Path) -> None:
+    cfg = tmp_path / "config" / "terminology"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "custom_settings.yml").write_text(
+        """
+settings:
+  enabled: true
+""",
+        encoding="utf-8",
+    )
+    (cfg / "custom_sources.yml").write_text(
+        """
+sources:
+  confluence:
+    mode: annotate_and_block
+    candidates_enabled: true
+""",
+        encoding="utf-8",
+    )
+    (cfg / "custom_terms.yml").write_text(
+        """
+terms:
+  - id: x
+    canonical: X
+    label: X
+    description: Desc
+    term_class: business
+    aliases: []
+    relations: []
+    applies_to: [confluence]
+    annotate_policy: first_occurrence
+    block_policy: include
+    case_sensitive: false
+    priority: 10
+""",
+        encoding="utf-8",
+    )
+
+    app_toml = tmp_path / "app.toml"
+    app_toml.write_text(
+        """
+[terminology]
+settings_file = "custom_settings.yml"
+sources_file = "custom_sources.yml"
+terms_file = "custom_terms.yml"
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("APP_CONFIG_FILE", str(app_toml))
+    AppConfig._config = None
+    AppConfig._env_loaded = True
+
+    config = TerminologyLoader(cfg).load()
+    assert "x" in config.terms_by_id
+
+
+def test_validator_uses_app_toml_file_names(monkeypatch, tmp_path: Path) -> None:
+    cfg = tmp_path / "config" / "terminology"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "s.yml").write_text(
+        """
+settings:
+  enabled: true
+""",
+        encoding="utf-8",
+    )
+    (cfg / "o.yml").write_text(
+        """
+sources:
+  jira:
+    mode: off
+    candidates_enabled: false
+""",
+        encoding="utf-8",
+    )
+    (cfg / "t.yml").write_text(
+        """
+terms:
+  - id: z
+    canonical: Z
+    label: Z
+    description: Desc
+    term_class: business
+    aliases: []
+    relations: []
+    applies_to: [jira]
+    annotate_policy: first_occurrence
+    block_policy: include
+    case_sensitive: false
+    priority: 1
+""",
+        encoding="utf-8",
+    )
+
+    app_toml = tmp_path / "app2.toml"
+    app_toml.write_text(
+        """
+[terminology.files]
+settings = "s.yml"
+sources = "o.yml"
+terms = "t.yml"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("APP_CONFIG_FILE", str(app_toml))
+    AppConfig._config = None
+    AppConfig._env_loaded = True
+
+    result = TerminologyValidator(cfg).validate()
+    assert result.errors == []

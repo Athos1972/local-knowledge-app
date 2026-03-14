@@ -237,11 +237,6 @@ class TableTransformer:
         )
         return TableTransformResult(
             markdown=markdown,
-            warning=TransformWarning(
-                code="complex_table",
-                message="Komplexe Tabelle wurde als separates Markdown-Artefakt ausgelagert.",
-                context=context,
-            ),
             extra_document=artifact,
         )
 

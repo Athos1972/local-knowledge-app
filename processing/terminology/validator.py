@@ -61,7 +61,7 @@ class TerminologyValidator:
     def validate(self) -> ValidationResult:
         result = ValidationResult()
         loader = TerminologyLoader(self._config_root)
-        self._validate_yaml_readable(result)
+        self._validate_yaml_readable(result, loader)
 
         if result.errors:
             return result
@@ -73,7 +73,7 @@ class TerminologyValidator:
             return result
 
         terms = config.terms_by_id
-        raw_terms = (loader._load_yaml('terms.yml').get('terms', []) if hasattr(loader, '_load_yaml') else [])
+        raw_terms = (loader._load_yaml(loader.file_names.terms).get('terms', []) if hasattr(loader, '_load_yaml') else [])
         result.stats.terms = len(terms)
         result.stats.sources = len(config.source_modes)
         result.stats.aliases = sum(len(term.aliases) for term in terms.values())
@@ -165,8 +165,8 @@ class TerminologyValidator:
         )
         return result
 
-    def _validate_yaml_readable(self, result: ValidationResult) -> None:
-        for filename in ["settings.yml", "sources.yml", "terms.yml"]:
+    def _validate_yaml_readable(self, result: ValidationResult, loader: TerminologyLoader) -> None:
+        for filename in [loader.file_names.settings, loader.file_names.sources, loader.file_names.terms]:
             path = self._config_root / filename
             if not path.exists():
                 result.errors.append(ValidationIssue("missing_file", f"Missing file '{filename}'", str(path)))

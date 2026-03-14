@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import csv
+import fnmatch
 import logging
 from collections import Counter
 from pathlib import Path
 import re
-from processing.terminology.candidates import CANDIDATE_COLUMNS
-from processing.terminology.loader import TerminologyLoader, TerminologySettings
+
+from processing.terminology.candidates import CANDIDATE_COLUMNS, CandidateRow
+from processing.terminology.loader import TerminologyLoader, TerminologySettings, resolve_terminology_file_names
 from processing.terminology.models import SourceMode, TerminologyResult, TerminologyTerm
 
 
@@ -14,6 +16,13 @@ logger = logging.getLogger(__name__)
 
 
 class TerminologyService:
+    """Apply terminology enrichment and maintain aggregated candidate reporting.
+
+    Candidate rows are aggregated by ``(source_type, normalized_term)`` across runs,
+    merged with any existing ``reports/terminology_candidates.csv`` content, and keep
+    reviewer columns stable.
+    """
+
     def __init__(self, config_root: Path | None = None, reports_root: Path | None = None) -> None:
         root = Path(__file__).resolve().parents[2]
         self._config_root = config_root or (root / "config" / "terminology")
@@ -22,6 +31,8 @@ class TerminologyService:
         self._settings = TerminologySettings(candidate_patterns=[r"\b[A-ZÄÖÜ][A-ZÄÖÜ0-9\-]{2,}\b"])
         self._source_modes: dict[str, SourceMode] = {}
         self._terms_by_id: dict[str, TerminologyTerm] = {}
+        self._candidate_exclude_patterns: list[str] = []
+        self._file_names = resolve_terminology_file_names()
         self._loaded = False
 
     def apply_to_text(self, text: str, source_type: str, *, source_ref: str = "") -> TerminologyResult:
@@ -81,6 +92,7 @@ class TerminologyService:
             self._settings = config.settings
             self._source_modes = config.source_modes
             self._terms_by_id = config.terms_by_id
+            self._candidate_exclude_patterns = self._load_candidate_exclude_patterns()
             self._loaded = True
             return True
         except Exception as exc:  # pragma: no cover - defensive runtime handling
@@ -192,9 +204,11 @@ class TerminologyService:
         source_ref: str,
         mentions: dict[str, list[re.Match[str]]],
     ) -> None:
+        """Merge current document candidates into the aggregated candidate CSV."""
         known = {m.group(0).lower() for matches in mentions.values() for m in matches}
         candidate_counts: Counter[str] = Counter()
         candidate_examples: dict[str, str] = {}
+        excluded_terms = 0
 
         for pattern in self._settings.candidate_patterns or []:
             for match in re.finditer(pattern, text):
@@ -203,23 +217,159 @@ class TerminologyService:
                     continue
                 if candidate.lower() in known:
                     continue
+                if self._is_excluded_candidate(candidate):
+                    excluded_terms += 1
+                    logger.debug("Terminology candidate excluded: source=%s term=%s", source_type, candidate)
+                    continue
                 candidate_counts[candidate] += 1
                 candidate_examples.setdefault(candidate, self._extract_context(text, match.start(), match.end()))
 
         if not candidate_counts:
+            logger.info(
+                "terminology candidates updated: source=%s new_terms=0 merged_terms=0 excluded_terms=%s csv_rows=%s",
+                source_type,
+                excluded_terms,
+                len(self._read_candidate_rows(self._reports_root / 'terminology_candidates.csv')),
+            )
             return
 
         self._reports_root.mkdir(parents=True, exist_ok=True)
         path = self._reports_root / "terminology_candidates.csv"
-        write_header = not path.exists()
-        with path.open("a", encoding="utf-8", newline="") as handle:
-            writer = csv.writer(handle)
-            if write_header:
-                writer.writerow(CANDIDATE_COLUMNS)
-            for term, count in sorted(candidate_counts.items()):
-                writer.writerow([source_type, term, count, source_ref, candidate_examples.get(term, ""), "false", "needs_review", "", "open", ""])
+        existing_rows = self._read_candidate_rows(path)
+        existing_index: dict[tuple[str, str], CandidateRow] = {
+            (row.source_type, self._normalize_candidate_term(row.term)): row for row in existing_rows
+        }
+
+        new_terms = 0
+        merged_terms = 0
+        for term, count in sorted(candidate_counts.items()):
+            key = (source_type, self._normalize_candidate_term(term))
+            row = existing_index.get(key)
+            if row is None:
+                new_terms += 1
+                row = CandidateRow(
+                    source_type=source_type,
+                    term=term,
+                    count=count,
+                    first_seen_file=source_ref,
+                    last_seen_file=source_ref,
+                    example_context=candidate_examples.get(term, ""),
+                )
+                existing_rows.append(row)
+                existing_index[key] = row
+                continue
+
+            merged_terms += 1
+            old_count = row.count
+            row.count += count
+            if not row.first_seen_file and source_ref:
+                row.first_seen_file = source_ref
+            if source_ref:
+                row.last_seen_file = source_ref
+            if not row.example_context:
+                row.example_context = candidate_examples.get(term, "")
+            logger.debug(
+                "Terminology candidate merged: source=%s term=%s old_count=%s new_count=%s",
+                source_type,
+                term,
+                old_count,
+                row.count,
+            )
+
+        existing_rows.sort(key=lambda row: (row.source_type, self._normalize_candidate_term(row.term), row.term))
+        self._write_candidate_rows(path, existing_rows)
+        logger.info(
+            "terminology candidates updated: source=%s new_terms=%s merged_terms=%s excluded_terms=%s csv_rows=%s",
+            source_type,
+            new_terms,
+            merged_terms,
+            excluded_terms,
+            len(existing_rows),
+        )
 
     def _extract_context(self, text: str, start: int, end: int) -> str:
         left = max(0, start - 40)
         right = min(len(text), end + 40)
         return " ".join(text[left:right].split())
+
+    def _read_candidate_rows(self, path: Path) -> list[CandidateRow]:
+        """Read candidate CSV rows and support legacy files without all columns."""
+        if not path.exists():
+            return []
+        rows: list[CandidateRow] = []
+        with path.open("r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            for record in reader:
+                rows.append(
+                    CandidateRow(
+                        source_type=str(record.get("source_type", "")),
+                        term=str(record.get("term", "")),
+                        count=int(record.get("count", "0") or 0),
+                        first_seen_file=str(record.get("first_seen_file", "")),
+                        last_seen_file=str(record.get("last_seen_file", "")),
+                        example_context=str(record.get("example_context", "")),
+                        already_known=str(record.get("already_known", "false") or "false"),
+                        suggested_action=str(record.get("suggested_action", "needs_review") or "needs_review"),
+                        selected_term_id=str(record.get("selected_term_id", "")),
+                        reviewer_status=str(record.get("reviewer_status", "open") or "open"),
+                        reviewer_note=str(record.get("reviewer_note", "")),
+                    )
+                )
+        return rows
+
+    def _write_candidate_rows(self, path: Path, rows: list[CandidateRow]) -> None:
+        """Write the aggregated candidate rows using canonical headers."""
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=CANDIDATE_COLUMNS)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(
+                    {
+                        "source_type": row.source_type,
+                        "term": row.term,
+                        "count": row.count,
+                        "first_seen_file": row.first_seen_file,
+                        "last_seen_file": row.last_seen_file,
+                        "example_context": row.example_context,
+                        "already_known": row.already_known,
+                        "suggested_action": row.suggested_action,
+                        "selected_term_id": row.selected_term_id,
+                        "reviewer_status": row.reviewer_status,
+                        "reviewer_note": row.reviewer_note,
+                    }
+                )
+
+    def _normalize_candidate_term(self, term: str) -> str:
+        """Normalize candidate terms for aggregation without changing visible CSV values."""
+        normalized = re.sub(r"\s+", " ", term.strip())
+        return normalized.lower()
+
+    def _load_candidate_exclude_patterns(self) -> list[str]:
+        """Load candidate exclude patterns from YAML (case-insensitive wildcard `*`)."""
+        path = self._config_root / self._file_names.candidate_exclude
+        if not path.exists():
+            return []
+
+        try:
+            import yaml
+
+            with path.open("r", encoding="utf-8") as handle:
+                raw = yaml.safe_load(handle) or {}
+            entries = raw.get("candidate_exclude", []) if isinstance(raw, dict) else []
+            if not isinstance(entries, list):
+                logger.warning("Invalid terminology candidate exclude config: %s", path)
+                return []
+            patterns = [str(entry).strip() for entry in entries if str(entry).strip()]
+            logger.debug("Terminology candidate exclude patterns loaded: count=%s", len(patterns))
+            return patterns
+        except Exception as exc:  # pragma: no cover - defensive runtime handling
+            logger.warning("Failed to load terminology candidate exclude patterns: %s", exc)
+            return []
+
+    def _is_excluded_candidate(self, candidate: str) -> bool:
+        """Return True when candidate matches any configured wildcard exclude."""
+        lowered = candidate.lower()
+        for pattern in self._candidate_exclude_patterns:
+            if fnmatch.fnmatch(lowered, pattern.lower()):
+                return True
+        return False

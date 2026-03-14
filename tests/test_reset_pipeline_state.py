@@ -21,6 +21,8 @@ def _paths(tmp_path: Path) -> ResetPaths:
         domains_root=data_root / "domains",
         reports_root=repo_root / "reports",
         logs_root=repo_root / "logs",
+        scripts_logs_root=repo_root / "scripts" / "logs",
+        scipts_logs_root=repo_root / "scipts" / "logs",
         index_root=data_root / "index",
         processed_root=data_root / "processed",
         audit_root=data_root / "system" / "audit",
@@ -194,3 +196,33 @@ def test_execute_prunes_empty_ingestion_manifest_directories(tmp_path: Path) -> 
     assert not warnings
     assert not (paths.ingestion_manifest_root / "runs").exists()
     assert paths.ingestion_manifest_root.exists()
+
+
+def test_logs_scope_includes_repo_and_script_log_directories(tmp_path: Path) -> None:
+    paths = _paths(tmp_path)
+    repo_log = paths.logs_root / "app.log"
+    script_log = paths.scripts_logs_root / "job.log"
+    scipts_log = paths.scipts_logs_root / "legacy.log"
+
+    repo_log.parent.mkdir(parents=True)
+    script_log.parent.mkdir(parents=True)
+    scipts_log.parent.mkdir(parents=True)
+
+    repo_log.write_text("a", encoding="utf-8")
+    script_log.write_text("b", encoding="utf-8")
+    scipts_log.write_text("c", encoding="utf-8")
+
+    options = ResetOptions(
+        execute=False,
+        yes=False,
+        keep_exports=False,
+        keep_anythingllm=False,
+        scopes=("logs",),
+    )
+
+    targets, _ = collect_targets(paths, options)
+    target_paths = {target.path for target in targets}
+
+    assert repo_log.resolve() in target_paths
+    assert script_log.resolve() in target_paths
+    assert scipts_log.resolve() in target_paths

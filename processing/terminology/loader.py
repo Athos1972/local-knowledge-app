@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from common.config import AppConfig
 from processing.terminology.models import SourceMode, TerminologyRelation, TerminologyTerm
 
 
@@ -14,6 +15,53 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SOURCE_TYPES = {"confluence", "jira", "mail", "teams", "scrape"}
 ALLOWED_SOURCE_MODES = {"off", "annotate_and_block", "block_only"}
+
+DEFAULT_SETTINGS_FILE = "settings.yml"
+DEFAULT_SOURCES_FILE = "sources.yml"
+DEFAULT_TERMS_FILE = "terms.yml"
+DEFAULT_CANDIDATE_EXCLUDE_FILE = "candidate_exclude.yml"
+
+
+@dataclass(frozen=True, slots=True)
+class TerminologyFileNames:
+    """Terminology file names resolved from app config with safe defaults."""
+
+    settings: str = DEFAULT_SETTINGS_FILE
+    sources: str = DEFAULT_SOURCES_FILE
+    terms: str = DEFAULT_TERMS_FILE
+    candidate_exclude: str = DEFAULT_CANDIDATE_EXCLUDE_FILE
+
+
+def resolve_terminology_file_names() -> TerminologyFileNames:
+    """Resolve terminology file names from `config/app.toml` with defaults.
+
+    Supported keys:
+    - `[terminology] settings_file/sources_file/terms_file/candidate_exclude_file`
+    - `[terminology.files] settings/sources/terms/candidate_exclude`
+
+    The app config cache is refreshed to avoid stale file-name overrides when
+    tests or scripts switch `APP_CONFIG_FILE` between calls.
+    """
+    AppConfig._config = None
+
+    def _resolve(*keys: str, default: str) -> str:
+        value = AppConfig.get(*keys, default=None)
+        if value is None:
+            return default
+        rendered = str(value).strip()
+        return rendered or default
+
+    return TerminologyFileNames(
+        settings=_resolve("terminology", "files", "settings", default=_resolve("terminology", "settings_file", default=DEFAULT_SETTINGS_FILE)),
+        sources=_resolve("terminology", "files", "sources", default=_resolve("terminology", "sources_file", default=DEFAULT_SOURCES_FILE)),
+        terms=_resolve("terminology", "files", "terms", default=_resolve("terminology", "terms_file", default=DEFAULT_TERMS_FILE)),
+        candidate_exclude=_resolve(
+            "terminology",
+            "files",
+            "candidate_exclude",
+            default=_resolve("terminology", "candidate_exclude_file", default=DEFAULT_CANDIDATE_EXCLUDE_FILE),
+        ),
+    )
 
 
 @dataclass(slots=True)
@@ -37,11 +85,12 @@ class TerminologyConfig:
 class TerminologyLoader:
     def __init__(self, config_root: Path) -> None:
         self._config_root = config_root
+        self.file_names = resolve_terminology_file_names()
 
     def load(self) -> TerminologyConfig:
-        settings_data = self._load_yaml("settings.yml")
-        sources_data = self._load_yaml("sources.yml")
-        terms_data = self._load_yaml("terms.yml")
+        settings_data = self._load_yaml(self.file_names.settings)
+        sources_data = self._load_yaml(self.file_names.sources)
+        terms_data = self._load_yaml(self.file_names.terms)
 
         settings = self.parse_settings(settings_data)
         source_modes = self.parse_sources(sources_data)
@@ -144,8 +193,16 @@ class TerminologyLoader:
         return terms
 
 
-def write_yaml_files(config_root: Path, settings: TerminologySettings, sources: dict[str, SourceMode], terms: list[TerminologyTerm]) -> None:
+def write_yaml_files(
+    config_root: Path,
+    settings: TerminologySettings,
+    sources: dict[str, SourceMode],
+    terms: list[TerminologyTerm],
+    *,
+    file_names: TerminologyFileNames | None = None,
+) -> None:
     config_root.mkdir(parents=True, exist_ok=True)
+    names = file_names or resolve_terminology_file_names()
 
     settings_payload = {
         "settings": {
@@ -197,6 +254,6 @@ def write_yaml_files(config_root: Path, settings: TerminologySettings, sources: 
         ]
     }
 
-    (config_root / "settings.yml").write_text(yaml.safe_dump(settings_payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    (config_root / "sources.yml").write_text(yaml.safe_dump(sources_payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
-    (config_root / "terms.yml").write_text(yaml.safe_dump(terms_payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    (config_root / names.settings).write_text(yaml.safe_dump(settings_payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    (config_root / names.sources).write_text(yaml.safe_dump(sources_payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    (config_root / names.terms).write_text(yaml.safe_dump(terms_payload, allow_unicode=True, sort_keys=False), encoding="utf-8")

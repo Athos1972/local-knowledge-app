@@ -99,7 +99,7 @@ class ConfluenceTableTransformerTests(unittest.TestCase):
         self.assertEqual("confluence_table", extra.doc_type)
         self.assertTrue(extra.metadata.get("table_complexity"))
         self.assertEqual(1, extra.metadata.get("table_index"))
-        self.assertTrue(any(w.code == "complex_table" for w in result.transform_warnings))
+        self.assertFalse(any(w.code == "complex_table" for w in result.transform_warnings))
 
     def test_promoted_properties_cover_aliases_and_lists(self) -> None:
         page = ConfluenceRawPage(
