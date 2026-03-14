@@ -357,6 +357,10 @@ python scripts/audit_report.py --run-id 20260311_194512_confluence_full --drilld
 - Komplexe Tabellen werden als separates Markdown-Artefakt im gleichen Zielordner abgelegt (`<page_id>__<page_slug>__table_<nn>.md`).
 - In der Hauptseite bleibt ein kurzer Verweis (`[Komplexe Tabelle ausgelagert: ...]`) inklusive Strukturhinweis erhalten.
 - Nicht unterstützte Makros werden rekursiv "entpackt": Makro-Hülle wird als Warning erfasst, der innere Inhalt aber weiter transformiert (inkl. verschachtelter Makros und Tabellen).
+- Draw.io-/diagrams.net-Makros (`drawio`, `draw.io`, `diagrams.net`, `inc-drawio`) werden semantisch als Markdown extrahiert (Elemente, Beziehungen, freie Diagrammtexte) und an der Makroposition eingefügt.
+- Bei nicht dekodierbarem Draw.io-Inhalt bricht die Seite nicht ab: stattdessen entsteht eine strukturierte Warning (`drawio_decode_failed` / `drawio_xml_parse_failed`) plus kompakter Fallback-Text für den Markdown-Body.
+- Bestimmte Container-Makros werden entpackt (nur Inneninhalt bleibt): `section`, `column`, `multiexcerpt`, `macrosuite-cards`, `classifications-combined-taxonomy`, `macrosuite-panel`.
+- Bewusst ignorierte Makros ohne Warning: `contentbylabel`, `classifications-hierarchy`, `classifications-category`, `anchor`, `create-from-template`, `livesearch`, `profile`, `tasks-report-macro`, `children`, `classifications-status`, `detailssummary`.
 
 ### Confluence Tasks: Open/Completed getrennt und entstört
 

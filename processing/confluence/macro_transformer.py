@@ -2,15 +2,34 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import html
 import logging
 import re
+import urllib.parse
+import zlib
 from collections import Counter
 from dataclasses import dataclass
+from xml.etree import ElementTree
 
 from processing.confluence.models import TransformWarning
 
 SUPPORTED_CALLOUTS = {"info", "note", "warning", "tip", "panel"}
+IGNORED_MACROS = {
+    "contentbylabel",
+    "classifications-hierarchy",
+    "classifications-category",
+    "anchor",
+    "create-from-template",
+    "livesearch",
+    "profile",
+    "tasks-report-macro",
+    "children",
+    "classifications-status",
+    "detailssummary",
+}
+DRAWIO_MACRO_NAMES = {"drawio", "draw.io", "diagrams.net", "inc-drawio"}
 SUPPORTED_SIMPLE = {
     "expand",
     "details",
@@ -28,8 +47,14 @@ SUPPORTED_SIMPLE = {
     "view-file",
     "details-summary",
     "page-properties-report",
+    "column",
+    "multiexcerpt",
+    "macrosuite-cards",
+    "classifications-combined-taxonomy",
+    "macrosuite-panel",
+    "section",
 }
-VALID_MACRO_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,80}$")
+VALID_MACRO_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,80}$")
 TASK_LIST_PATTERN = re.compile(r"<ac:task-list>(.*?)</ac:task-list>", re.DOTALL | re.IGNORECASE)
 TASK_ITEM_PATTERN = re.compile(r"<ac:task>(.*?)</ac:task>", re.DOTALL | re.IGNORECASE)
 MENTION_PATTERN = re.compile(r'<ri:user[^>]*ri:display-name="([^"]+)"[^>]*/?>', re.IGNORECASE)
@@ -76,6 +101,18 @@ DOMAIN_SIGNALS = {
 logger = logging.getLogger(__name__)
 
 
+
+
+@dataclass(slots=True)
+class DrawIoDiagramData:
+    """Semantisch extrahierte Draw.io-Informationen aus einem Makro."""
+
+    name: str | None
+    elements: list[str]
+    relationships: list[str]
+    extra_texts: list[str]
+
+
 @dataclass(slots=True)
 class ConfluenceTaskItem:
     raw_text: str
@@ -118,6 +155,7 @@ class MacroTransformer:
         transformed = self._replace_status_macro(transformed)
         transformed = self._replace_task_items(transformed)
         transformed = self._remove_toc_macro(transformed)
+        transformed = self._remove_ignored_macros(transformed)
         transformed = self._remove_page_properties_report_macro(transformed)
         transformed = self._replace_plantuml_macro(transformed, warnings)
         transformed = self._unwrap_table_like_macro(transformed, "table-filter")
@@ -125,8 +163,15 @@ class MacroTransformer:
         transformed = self._unwrap_table_like_macro(transformed, "table-chart")
         transformed = self._unwrap_table_like_macro(transformed, "tablechart")
         transformed = self._unwrap_table_like_macro(transformed, "table-transformer")
+        transformed = self._unwrap_table_like_macro(transformed, "column")
+        transformed = self._unwrap_table_like_macro(transformed, "multiexcerpt")
+        transformed = self._unwrap_table_like_macro(transformed, "macrosuite-cards")
+        transformed = self._unwrap_table_like_macro(transformed, "classifications-combined-taxonomy")
+        transformed = self._unwrap_table_like_macro(transformed, "macrosuite-panel")
+        transformed = self._unwrap_table_like_macro(transformed, "section")
         transformed = self._replace_jira_macro(transformed, warnings)
         transformed = self._replace_view_file_macro(transformed, warnings)
+        transformed = self._replace_drawio_macro(transformed, warnings)
         return transformed
 
     def _unwrap_unsupported_macros(
@@ -142,7 +187,7 @@ class MacroTransformer:
 
         def replace_unsupported(match: re.Match[str]) -> str:
             macro_name = self._extract_macro_name(match.group("attrs"), warnings)
-            if macro_name in SUPPORTED_CALLOUTS | SUPPORTED_SIMPLE:
+            if self._is_supported_macro(macro_name):
                 return match.group(0)
 
             unsupported.append(macro_name)
@@ -207,6 +252,17 @@ class MacroTransformer:
             re.DOTALL,
         )
         return pattern.sub("", text)
+
+    def _remove_ignored_macros(self, text: str) -> str:
+        """Entfernt explizit ignorierte Makros ohne Warnung und ohne Ersatzinhalt."""
+        output = text
+        for macro_name in IGNORED_MACROS:
+            pattern = re.compile(
+                rf"<ac:structured-macro[^>]*ac:name=\"{re.escape(macro_name)}\"[^>]*>.*?</ac:structured-macro>",
+                re.DOTALL | re.IGNORECASE,
+            )
+            output = pattern.sub("", output)
+        return output
 
     def _remove_page_properties_report_macro(self, text: str) -> str:
         """Entfernt page-properties-report-Makros, Inhalt wird separat über Tabellen verarbeitet."""
@@ -312,6 +368,326 @@ class MacroTransformer:
             return "\n[FILE_BLOCK]\nDatei-Referenz konnte nicht eindeutig extrahiert werden.\n"
 
         return pattern.sub(repl, text)
+
+    def _replace_drawio_macro(self, text: str, warnings: list[TransformWarning]) -> str:
+        """Rendert Draw.io-/diagrams.net-Makros als semantischen Markdown-Block."""
+        pattern = re.compile(
+            r"<ac:structured-macro\b(?P<attrs>[^>]*)>(?P<body>.*?)</ac:structured-macro>",
+            re.DOTALL | re.IGNORECASE,
+        )
+
+        def repl(match: re.Match[str]) -> str:
+            macro_name = self._extract_macro_name(match.group("attrs"), warnings)
+            if not self._is_drawio_macro_name(macro_name):
+                return match.group(0)
+
+            warnings.append(
+                TransformWarning(
+                    code="drawio_macro_detected",
+                    message=f"Draw.io-Makro erkannt: {macro_name}",
+                    context=macro_name,
+                )
+            )
+            rendered = self._render_drawio_macro_block(macro_name, match.group("body"), warnings)
+            return f"\n{rendered}\n"
+
+        return pattern.sub(repl, text)
+
+    def _render_drawio_macro_block(self, macro_name: str, block: str, warnings: list[TransformWarning]) -> str:
+        if re.search(r"<ri:attachment\b", block, re.IGNORECASE):
+            warnings.append(
+                TransformWarning(
+                    code="drawio_attachment_reference_unsupported",
+                    message="Draw.io-Makro referenziert Attachment; direkte Extraktion aktuell nicht unterstützt.",
+                    context=macro_name,
+                )
+            )
+
+        xml_payload = self._extract_drawio_xml_payload(block)
+        if not xml_payload:
+            warnings.append(
+                TransformWarning(
+                    code="drawio_decode_failed",
+                    message="Draw.io-Inhalt konnte nicht dekodiert werden.",
+                    context=macro_name,
+                )
+            )
+            return "Draw.io-Diagramm erkannt, aber nicht extrahierbar."
+
+        diagram_data = self._parse_drawio_diagram(xml_payload, warnings, macro_name)
+        if diagram_data is None:
+            return "Draw.io-Diagramm erkannt, aber nicht extrahierbar."
+
+        markdown = self._render_drawio_markdown(diagram_data)
+        if markdown:
+            return markdown
+
+        warnings.append(
+            TransformWarning(
+                code="drawio_no_semantic_content",
+                message="Draw.io-Diagramm ohne extrahierbaren semantischen Inhalt erkannt.",
+                context=macro_name,
+            )
+        )
+        return "Draw.io-Diagramm erkannt, aber kein extrahierbarer semantischer Inhalt gefunden."
+
+    def _extract_drawio_xml_payload(self, block: str) -> str | None:
+        candidates = self._collect_drawio_candidates(block)
+        for candidate in candidates:
+            decoded = self._decode_drawio_candidate(candidate)
+            if decoded:
+                return decoded
+        return None
+
+    def _collect_drawio_candidates(self, block: str) -> list[str]:
+        candidates: list[str] = []
+        plain_body = re.search(r"<ac:plain-text-body><!\[CDATA\[(.*?)\]\]></ac:plain-text-body>", block, re.DOTALL)
+        if plain_body:
+            candidates.append(plain_body.group(1).strip())
+
+        rich_text_body = re.search(r"<ac:rich-text-body>(.*?)</ac:rich-text-body>", block, re.DOTALL)
+        if rich_text_body:
+            candidates.append(rich_text_body.group(1).strip())
+
+        for parameter in re.finditer(r'<ac:parameter[^>]*ac:name="([^"]+)"[^>]*>(.*?)</ac:parameter>', block, re.DOTALL):
+            raw_name, raw_value = parameter.group(1).strip(), parameter.group(2).strip()
+            name = raw_name.lower()
+            if any(token in name for token in ("xml", "diagram", "content", "data", "body")):
+                candidates.append(raw_value)
+
+        return [candidate for candidate in candidates if candidate and candidate.strip()]
+
+    def _decode_drawio_candidate(self, candidate: str) -> str | None:
+        stripped = candidate.strip()
+        direct_xml = self._extract_xml_from_text(stripped)
+        if direct_xml:
+            return direct_xml
+
+        without_tags = self._strip_tags(stripped)
+        if without_tags and without_tags != stripped:
+            direct_xml = self._extract_xml_from_text(without_tags)
+            if direct_xml:
+                return direct_xml
+
+        if not without_tags:
+            return None
+
+        base64_decoded = self._try_base64_decode(without_tags)
+        if base64_decoded:
+            direct_xml = self._extract_xml_from_text(base64_decoded)
+            if direct_xml:
+                return direct_xml
+            inflated = self._try_inflate_urlencoded(base64_decoded)
+            if inflated:
+                return inflated
+
+        inflated = self._try_inflate_urlencoded(without_tags)
+        if inflated:
+            return inflated
+
+        return None
+
+    def _extract_xml_from_text(self, value: str) -> str | None:
+        stripped = value.strip()
+        for start_tag in ("<mxfile", "<mxGraphModel", "<diagram"):
+            start = stripped.find(start_tag)
+            if start >= 0:
+                return stripped[start:]
+
+        if "&lt;mx" in stripped or "&lt;diagram" in stripped:
+            unescaped = html.unescape(stripped)
+            for start_tag in ("<mxfile", "<mxGraphModel", "<diagram"):
+                start = unescaped.find(start_tag)
+                if start >= 0:
+                    return unescaped[start:]
+        return None
+
+    def _try_base64_decode(self, value: str) -> str | None:
+        compact = re.sub(r"\s+", "", value)
+        if not compact or len(compact) < 12:
+            return None
+        try:
+            decoded_bytes = base64.b64decode(compact, validate=True)
+        except (ValueError, binascii.Error):
+            return None
+        for encoding in ("utf-8", "latin-1"):
+            try:
+                return decoded_bytes.decode(encoding)
+            except UnicodeDecodeError:
+                continue
+        return None
+
+    def _try_inflate_urlencoded(self, value: str) -> str | None:
+        normalized = value.strip()
+        if not normalized:
+            return None
+        binary: bytes
+        try:
+            binary = normalized.encode("latin-1")
+        except UnicodeEncodeError:
+            return None
+
+        for wbits in (-15, 15):
+            try:
+                inflated = zlib.decompress(binary, wbits)
+            except zlib.error:
+                continue
+            decoded = urllib.parse.unquote(inflated.decode("utf-8", errors="ignore"))
+            xml_payload = self._extract_xml_from_text(decoded)
+            if xml_payload:
+                return xml_payload
+        return None
+
+    def _parse_drawio_diagram(
+        self,
+        xml_payload: str,
+        warnings: list[TransformWarning],
+        context: str,
+    ) -> DrawIoDiagramData | None:
+        try:
+            root = ElementTree.fromstring(xml_payload)
+        except ElementTree.ParseError:
+            warnings.append(
+                TransformWarning(
+                    code="drawio_xml_parse_failed",
+                    message="Draw.io-XML konnte nicht geparst werden.",
+                    context=context,
+                )
+            )
+            return None
+
+        if root.tag == "mxfile":
+            diagram = root.find("diagram")
+            if diagram is None:
+                return DrawIoDiagramData(name=None, elements=[], relationships=[], extra_texts=[])
+            diagram_name = diagram.attrib.get("name")
+            compressed = diagram.attrib.get("compressed", "").lower() == "true"
+            inner = (diagram.text or "").strip()
+            if compressed and inner:
+                decoded = self._decode_drawio_candidate(inner)
+                if not decoded:
+                    warnings.append(
+                        TransformWarning(
+                            code="drawio_decode_failed",
+                            message="Komprimierter Draw.io-Diagramminhalt konnte nicht dekodiert werden.",
+                            context=context,
+                        )
+                    )
+                    return None
+                return self._parse_drawio_diagram(decoded, warnings, context)
+
+            model = diagram.find("mxGraphModel")
+            if model is not None:
+                return self._extract_drawio_semantics(model, diagram_name)
+            if inner:
+                return self._parse_drawio_diagram(inner, warnings, context)
+            return DrawIoDiagramData(name=diagram_name, elements=[], relationships=[], extra_texts=[])
+
+        if root.tag == "diagram":
+            diagram_name = root.attrib.get("name")
+            model = root.find("mxGraphModel")
+            if model is not None:
+                return self._extract_drawio_semantics(model, diagram_name)
+            inner = (root.text or "").strip()
+            if inner:
+                decoded = self._decode_drawio_candidate(inner)
+                if decoded:
+                    return self._parse_drawio_diagram(decoded, warnings, context)
+            return DrawIoDiagramData(name=diagram_name, elements=[], relationships=[], extra_texts=[])
+
+        if root.tag == "mxGraphModel":
+            return self._extract_drawio_semantics(root, None)
+
+        return DrawIoDiagramData(name=None, elements=[], relationships=[], extra_texts=[])
+
+    def _extract_drawio_semantics(self, model: ElementTree.Element, diagram_name: str | None) -> DrawIoDiagramData:
+        nodes: dict[str, str] = {}
+        node_order: list[str] = []
+        relationships: list[str] = []
+        free_texts: list[str] = []
+
+        for cell in model.findall(".//mxCell"):
+            cell_id = (cell.attrib.get("id") or "").strip()
+            label = self._normalize_drawio_label(cell.attrib.get("value", ""))
+            source = (cell.attrib.get("source") or "").strip()
+            target = (cell.attrib.get("target") or "").strip()
+            edge_flag = cell.attrib.get("edge") == "1"
+            vertex_flag = cell.attrib.get("vertex") == "1"
+
+            if edge_flag:
+                source_label = nodes.get(source) or source
+                target_label = nodes.get(target) or target
+                if source_label and target_label and source_label not in {"0", "1"} and target_label not in {"0", "1"}:
+                    relation = f"{source_label} -> {target_label}"
+                    if label:
+                        relation = f"{relation} ({label})"
+                    relationships.append(relation)
+                elif label:
+                    free_texts.append(label)
+                continue
+
+            if not vertex_flag and not label:
+                continue
+            if cell_id in {"0", "1"}:
+                continue
+            if label:
+                nodes[cell_id] = label
+                node_order.append(label)
+
+        elements = self._dedupe_keep_order(node_order)
+        relationships = self._dedupe_keep_order(relationships)
+        extra_texts = self._dedupe_keep_order([text for text in free_texts if text and text not in elements])
+        return DrawIoDiagramData(name=diagram_name, elements=elements, relationships=relationships, extra_texts=extra_texts)
+
+    def _render_drawio_markdown(self, diagram: DrawIoDiagramData) -> str:
+        diagram_name = diagram.name or "Unbenannt"
+        lines = [f"## Diagramm: {diagram_name}"]
+        has_semantics = False
+
+        if diagram.elements:
+            has_semantics = True
+            lines.append("\n### Diagramm-Elemente")
+            lines.extend(f"- {item}" for item in diagram.elements)
+
+        if diagram.relationships:
+            has_semantics = True
+            lines.append("\n### Beziehungen")
+            lines.extend(f"- {item}" for item in diagram.relationships)
+
+        if diagram.extra_texts:
+            has_semantics = True
+            lines.append("\n### Diagrammtexte")
+            lines.extend(f"- {item}" for item in diagram.extra_texts)
+
+        if not has_semantics:
+            return ""
+
+        return "\n".join(lines).strip()
+
+    def _normalize_drawio_label(self, value: str) -> str:
+        if not value:
+            return ""
+        cleaned = html.unescape(value)
+        cleaned = cleaned.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+        cleaned = re.sub(r"</(?:div|p|li|h\d)>", "\n", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"<li[^>]*>", "- ", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+        cleaned = re.sub(r"[\t\r]+", " ", cleaned)
+        cleaned = re.sub(r" *\n *", "\n", cleaned)
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        cleaned = re.sub(r" {2,}", " ", cleaned)
+        return cleaned.strip()
+
+    def _dedupe_keep_order(self, values: list[str]) -> list[str]:
+        deduped: list[str] = []
+        for value in values:
+            normalized = value.strip()
+            if not normalized:
+                continue
+            if normalized in deduped:
+                continue
+            deduped.append(normalized)
+        return deduped
 
     def _replace_status_macro(self, text: str) -> str:
         pattern = re.compile(
@@ -517,6 +893,18 @@ class MacroTransformer:
             return None
         filename = match.group(1).strip()
         return filename or None
+
+    def _is_supported_macro(self, macro_name: str) -> bool:
+        normalized = self._normalize_macro_name(macro_name)
+        supported = {self._normalize_macro_name(name) for name in (SUPPORTED_CALLOUTS | SUPPORTED_SIMPLE | IGNORED_MACROS | DRAWIO_MACRO_NAMES)}
+        return normalized in supported
+
+    def _is_drawio_macro_name(self, macro_name: str) -> bool:
+        normalized = self._normalize_macro_name(macro_name)
+        return normalized in {self._normalize_macro_name(name) for name in DRAWIO_MACRO_NAMES}
+
+    def _normalize_macro_name(self, macro_name: str) -> str:
+        return macro_name.strip().lower()
 
     def _extract_macro_name(self, attrs: str, warnings: list[TransformWarning]) -> str:
         """Liest den Makronamen robust aus Attributen und validiert ihn."""
