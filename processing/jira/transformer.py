@@ -10,6 +10,7 @@ from processing.confluence.link_transformer import LinkTransformer
 from processing.confluence.models import TransformWarning
 from processing.jira.models import JiraRawIssue, JiraTransformedIssue
 from sources.document import stable_hash
+from processing.terminology import TerminologyService
 from transformers.router import TransformRouter
 
 
@@ -19,6 +20,7 @@ class JiraTransformer:
     def __init__(self) -> None:
         self._link_transformer = LinkTransformer()
         self._transform_router = TransformRouter()
+        self._terminology_service = TerminologyService()
 
     def transform(self, issue: JiraRawIssue) -> JiraTransformedIssue:
         warnings: list[TransformWarning] = []
@@ -48,6 +50,11 @@ class JiraTransformer:
             lines.extend(["", "## Anhang-Inhalte (extrahiert)", "", *attachment_sections])
 
         body = "\n".join(lines).rstrip() + self._link_transformer.render_attachments(issue.attachments)
+        terminology_result = self._terminology_service.apply_to_text(
+            body,
+            source_type="jira",
+            source_ref=issue.source_ref,
+        )
 
         attachment_signature = ",".join(sorted(f"{a.get('name','')}|{a.get('local_path','')}" for a in issue.attachments if isinstance(a, dict)))
         content_hash = stable_hash(
@@ -68,7 +75,7 @@ class JiraTransformer:
             issue_key=issue.issue_key,
             project_key=issue.project_key,
             summary=issue.summary,
-            body_markdown=body,
+            body_markdown=terminology_result.text,
             source_ref=issue.source_ref,
             source_url=issue.source_url,
             created_at=issue.created_at,

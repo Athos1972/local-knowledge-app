@@ -447,3 +447,13 @@ Empfehlung bei neuen Regeln:
 2. Optional Detailkontext in `message`/`extra_json` speichern.
 3. Neue Codes zentral in `processing/audit/models.py` ergänzen, damit Reports aggregierbar bleiben.
 4. Für spezifische Projektregeln bei Bedarf ein stabiles Präfix wie `custom_filter_<rule_name>` verwenden.
+
+
+## Terminologie (V1)
+
+Eine zentrale Terminologie-Engine ist für `confluence` und `jira` aktiv integriert und pro Source-Type konfigurierbar.
+
+- Konfiguration: `config/terminology/settings.yml`, `config/terminology/sources.yml`, `config/terminology/terms.yml`
+- Entwicklerdoku: `docs/terminology.md`
+- Kandidatenreport: `reports/terminology_candidates.csv`
+

@@ -1,0 +1,97 @@
+terms:
+  - id: prews
+    canonical: PREWS
+    label: Projekt-Requirements-Workshop
+    description: Strukturierter Workshop zur Erhebung und Abstimmung von Projektanforderungen.
+    term_class: process
+    aliases: []
+    relations: []
+    applies_to: [confluence, jira, mail, teams]
+    annotate_policy: first_occurrence
+    block_policy: include
+    case_sensitive: false
+    priority: 20
+
+  - id: psp_ap
+    canonical: PSP-AP
+    label: PSP-Element im Projektkontext
+    description: Arbeitspaket-Knoten im Projektstrukturplan.
+    term_class: process
+    aliases: [PSP AP]
+    relations: []
+    applies_to: [confluence, jira, mail, teams]
+    annotate_policy: first_occurrence
+    block_policy: include
+    case_sensitive: false
+    priority: 30
+
+  - id: isu
+    canonical: ISU
+    label: SAP Industry Solution Utilities
+    description: Utilities-spezifische SAP-Lösung.
+    term_class: system
+    aliases: [IS-U]
+    relations: []
+    applies_to: [confluence, jira, mail, teams]
+    annotate_policy: first_occurrence
+    block_policy: include
+    case_sensitive: false
+    priority: 10
+
+  - id: eda
+    canonical: EDA
+    label: Energy Data Exchange Austria
+    description: Plattform im energiewirtschaftlichen Datenaustausch.
+    term_class: organisation
+    aliases: []
+    relations:
+      - type: related_to
+        target: ponton
+    applies_to: [confluence, jira, mail, teams]
+    annotate_policy: first_occurrence
+    block_policy: include
+    case_sensitive: false
+    priority: 15
+
+  - id: ponton
+    canonical: PONTON
+    label: PONTON GmbH
+    description: Anbieter von Marktplattform- und Energiemarktlösungen.
+    term_class: organisation
+    aliases: []
+    relations:
+      - type: related_to
+        target: eda
+    applies_to: [confluence, jira, mail, teams]
+    annotate_policy: first_occurrence
+    block_policy: include
+    case_sensitive: false
+    priority: 16
+
+  - id: maxmueller
+    canonical: MM
+    label: Max Müller
+    description: Beispiel-Personenkürzel, in V1 ohne In-Text-Annotation.
+    term_class: person
+    aliases: [M. Müller]
+    relations:
+      - type: abbreviation_of
+        target: maxmueller_name
+    applies_to: [confluence, jira]
+    annotate_policy: first_occurrence
+    block_policy: exclude
+    case_sensitive: false
+    priority: 90
+
+  - id: maxmueller_name
+    canonical: Max Müller
+    label: Max Müller
+    description: Vollständiger Personenname für relationale Zuordnung.
+    term_class: person
+    aliases: []
+    relations: []
+    applies_to: [confluence, jira]
+    annotate_policy: first_occurrence
+    block_policy: exclude
+    case_sensitive: false
+    priority: 91
