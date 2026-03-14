@@ -55,7 +55,8 @@ SUPPORTED_SIMPLE = {
     "toc",
     "plantuml",
     "plantumlrender",
-    "table-filter",
+    "table-filter",+
+    'u7'
     "tablefilter",
     "table-chart",
     "tablechart",
