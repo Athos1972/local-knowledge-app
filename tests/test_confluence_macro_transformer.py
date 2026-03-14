@@ -217,8 +217,8 @@ class ConfluenceMacroTransformerTests(unittest.TestCase):
         )
 
         self.assertTrue(decision_task.contains_decision_signal)
-        self.assertEqual(decision_task.keep_reason, 'decision_signal')
-        self.assertEqual(decision_task.drop_reason, '')
+        self.assertEqual(decision_task.keep_reason, '')
+        self.assertEqual(decision_task.drop_reason, 'missing_mention')
         self.assertEqual(trivial_task.keep_reason, '')
         self.assertEqual(trivial_task.drop_reason, 'trivial_communication')
 
@@ -249,11 +249,11 @@ class ConfluenceMacroTransformerTests(unittest.TestCase):
         self.assertIn('Mentions: Franzi.', result.body_markdown)
         self.assertIn('Status: completed.', result.body_markdown)
         self.assertIn('Date: 2026-02-14.', result.body_markdown)
-        self.assertIn('CR freigegeben Link.', result.body_markdown)
-        self.assertIn('Links: https://example.org/cr/123.', result.body_markdown)
+        self.assertNotIn('CR freigegeben Link.', result.body_markdown)
+        self.assertNotIn('Links: https://example.org/cr/123.', result.body_markdown)
 
         self.assertEqual(result.promoted_properties.get('open_task_count'), 1)
-        self.assertEqual(result.promoted_properties.get('completed_task_count'), 2)
+        self.assertEqual(result.promoted_properties.get('completed_task_count'), 1)
         self.assertEqual(result.promoted_properties.get('open_task_mentions'), ['Peter'])
         self.assertEqual(result.promoted_properties.get('completed_task_mentions'), ['Franzi'])
 
@@ -271,17 +271,17 @@ class ConfluenceMacroTransformerTests(unittest.TestCase):
         self.assertNotIn('bitte prüfen', result.body_markdown)
         self.assertNotIn('open_task_count', result.promoted_properties)
 
-    def test_short_but_informative_completed_task_is_kept(self) -> None:
+    def test_task_without_mentions_is_dropped(self) -> None:
         result = self._transform(
             '<ac:task-list>'
             '<ac:task><ac:task-status>complete</ac:task-status><ac:task-body>CR freigegeben</ac:task-body></ac:task>'
             '</ac:task-list>'
         )
 
-        self.assertIn('## Completed Tasks', result.body_markdown)
-        self.assertIn('CR freigegeben.', result.body_markdown)
-        self.assertIn('Status: completed.', result.body_markdown)
-        self.assertEqual(result.promoted_properties.get('completed_task_count'), 1)
+        self.assertNotIn('## Completed Tasks', result.body_markdown)
+        self.assertNotIn('CR freigegeben.', result.body_markdown)
+        self.assertNotIn('Status: completed.', result.body_markdown)
+        self.assertNotIn('completed_task_count', result.promoted_properties)
 
     def test_log_title_pattern_is_ignored_case_insensitive(self) -> None:
         transformer = ConfluenceTransformer()

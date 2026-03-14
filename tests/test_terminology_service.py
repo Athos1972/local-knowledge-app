@@ -242,3 +242,53 @@ def test_candidate_noop_is_stable(tmp_path: Path) -> None:
 
     service.apply_to_text("ISU IS-U", "confluence", source_ref="known.md")
     assert not (reports_root / "terminology_candidates.csv").exists()
+
+
+def test_candidates_are_still_reported_when_no_terms_for_source(tmp_path: Path) -> None:
+    cfg = tmp_path / "config" / "terminology"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "settings.yml").write_text(
+        """
+settings:
+  enabled: true
+  candidate_detection_enabled: true
+  candidate_patterns:
+    - '\\b[A-Z][A-Z0-9\\-]{2,}\\b'
+""",
+        encoding="utf-8",
+    )
+    (cfg / "sources.yml").write_text(
+        """
+sources:
+  confluence:
+    mode: annotate_and_block
+    candidates_enabled: true
+""",
+        encoding="utf-8",
+    )
+    (cfg / "terms.yml").write_text(
+        """
+terms:
+  - id: only_jira
+    canonical: ALREADYKNOWN
+    label: known
+    description: known
+    term_class: system
+    aliases: []
+    relations: []
+    applies_to: [jira]
+    annotate_policy: first_occurrence
+    block_policy: include
+    case_sensitive: false
+    priority: 1
+""",
+        encoding="utf-8",
+    )
+
+    reports_root = tmp_path / "reports"
+    service = TerminologyService(config_root=cfg, reports_root=reports_root)
+
+    service.apply_to_text("ALPHA BETA", "confluence", source_ref="page.md")
+
+    rows = _read_candidates(reports_root / "terminology_candidates.csv")
+    assert {row["term"] for row in rows} == {"ALPHA", "BETA"}

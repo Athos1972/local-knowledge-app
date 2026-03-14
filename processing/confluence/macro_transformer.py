@@ -55,8 +55,8 @@ SUPPORTED_SIMPLE = {
     "toc",
     "plantuml",
     "plantumlrender",
-    "table-filter",+
-    'u7'
+    "table-filter",
+    "u7",
     "tablefilter",
     "table-chart",
     "tablechart",
@@ -871,6 +871,8 @@ class MacroTransformer:
 
     def _classify_task(self, task: ConfluenceTaskItem) -> tuple[str, str]:
         """Classify tasks using semantic signals instead of hard minimum length thresholds."""
+        if not task.assignees:
+            return "", "missing_mention"
         if not task.cleaned_text:
             return "", "empty_after_cleanup"
         if self._is_semantically_trivial(task.cleaned_text):

@@ -52,17 +52,18 @@ class TerminologyService:
         scoped_terms = self._terms_for_source(source_type)
         if not scoped_terms:
             logger.info("Terminology skipped: source=%s reason=no_terms", source_type)
-            return TerminologyResult(text=text)
 
         working_text = text
-        mentions = self._match_terms(working_text, scoped_terms)
+        mentions: dict[str, list[re.Match[str]]] = {}
+        if scoped_terms:
+            mentions = self._match_terms(working_text, scoped_terms)
 
         annotations = 0
-        if source_mode.mode == "annotate_and_block":
+        if scoped_terms and source_mode.mode == "annotate_and_block":
             working_text, annotations = self._annotate_first_occurrences(working_text, mentions)
 
         block_added = False
-        if source_mode.mode in {"annotate_and_block", "block_only"}:
+        if scoped_terms and source_mode.mode in {"annotate_and_block", "block_only"}:
             working_text, block_added = self._append_terminology_block(working_text, mentions)
 
         if self._settings.candidate_detection_enabled and source_mode.candidates_enabled:
