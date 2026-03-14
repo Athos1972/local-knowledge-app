@@ -67,36 +67,6 @@ Für behaltene Tasks werden zusätzliche `promoted_properties` gesetzt:
 Signalwortlisten sind in `macro_transformer.py` zentral gehalten und können später konfigurierbar gemacht werden.
 
 
-## Draw.io-/diagrams.net-Extraktion
-
-Der `MacroTransformer` unterstützt nun Draw.io-Makros (`drawio`, `draw.io`, `diagrams.net`, `inc-drawio`) direkt im normalen Seitenfluss.
-
-### Unterstützte Fälle
-
-- Direktes XML im Makro (`mxGraphModel`, `mxfile`, `diagram`).
-- Typische encodierte Payloads (Base64 sowie deflate+URL-encoded Inhalte).
-- Semantische Ausgabe als Markdown-Blöcke an Makroposition:
-  - `## Diagramm: <Name|Unbenannt>`
-  - `### Diagramm-Elemente`
-  - `### Beziehungen`
-  - `### Diagrammtexte`
-
-### Noch nicht vollständig unterstützt
-
-- Rein attachment-basierte Draw.io-Referenzen ohne eingebettete XML-Daten.
-
-In diesem Fall wird bewusst nur eine Warning erzeugt (`drawio_attachment_reference_unsupported`) und die Seitentransformation läuft ohne Fehler weiter.
-
-### Warnings
-
-- `drawio_macro_detected`
-- `drawio_decode_failed`
-- `drawio_xml_parse_failed`
-- `drawio_no_semantic_content`
-- `drawio_attachment_reference_unsupported`
-
-Diese Informationen helfen bei Observability und verbessern die Priorisierung für spätere Ausbaustufen.
-
 ## Bewusst ignorierte Makros
 
 Folgende Makros werden ohne Warning und ohne Aktion entfernt:
@@ -112,5 +82,9 @@ Folgende Makros werden ohne Warning und ohne Aktion entfernt:
 - `children`
 - `classifications-status`
 - `detailssummary`
+- `drawio`
+- `draw.io`
+- `diagrams.net`
+- `inc-drawio`
 
 Das reduziert Rauschen im Output und verbessert die Nutzbarkeit für RAG/Chunking.

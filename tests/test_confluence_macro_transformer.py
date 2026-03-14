@@ -417,107 +417,21 @@ class ConfluenceMacroTransformerTests(unittest.TestCase):
         self.assertNotIn("code", result.unsupported_macros)
         self.assertNotIn("flowchart", result.unsupported_macros)
 
-    def test_drawio_direct_xml_extracts_elements_and_relationships(self) -> None:
-        drawio_xml = (
-            '<mxGraphModel><root>'
-            '<mxCell id="0"/><mxCell id="1" parent="0"/>'
-            '<mxCell id="2" value="API Gateway" vertex="1" parent="1"/>'
-            '<mxCell id="3" value="Billing Service" vertex="1" parent="1"/>'
-            '<mxCell id="4" value="Event Mesh" vertex="1" parent="1"/>'
-            '<mxCell id="5" edge="1" source="2" target="3" value="sync" parent="1"/>'
-            '<mxCell id="6" edge="1" source="3" target="4" parent="1"/>'
-            '</root></mxGraphModel>'
-        )
+    def test_drawio_macros_are_skipped_without_warnings(self) -> None:
         result = self._transform(
-            '<ac:structured-macro ac:name="drawio">'
-            f'<ac:plain-text-body><![CDATA[{drawio_xml}]]></ac:plain-text-body>'
-            '</ac:structured-macro>'
+            '<p>Vorher</p>'
+            '<ac:structured-macro ac:name="drawio"><ac:plain-text-body><![CDATA[x]]></ac:plain-text-body></ac:structured-macro>'
+            '<ac:structured-macro ac:name="draw.io"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="diagrams.net"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="inc-drawio"></ac:structured-macro>'
+            '<p>Nachher</p>'
         )
 
-        self.assertIn("## Diagramm: Unbenannt", result.body_markdown)
-        self.assertIn("### Diagramm-Elemente", result.body_markdown)
-        self.assertIn("- API Gateway", result.body_markdown)
-        self.assertIn("### Beziehungen", result.body_markdown)
-        self.assertIn("- API Gateway -> Billing Service (sync)", result.body_markdown)
-        self.assertIn("- Billing Service -> Event Mesh", result.body_markdown)
-        self.assertTrue(any(w.code == "drawio_macro_detected" for w in result.transform_warnings))
-
-    def test_drawio_without_edges_keeps_texts(self) -> None:
-        drawio_xml = (
-            '<mxGraphModel><root>'
-            '<mxCell id="0"/><mxCell id="1" parent="0"/>'
-            '<mxCell id="2" value="Nur Text A" vertex="1" parent="1"/>'
-            '<mxCell id="3" value="Nur Text B" vertex="1" parent="1"/>'
-            '</root></mxGraphModel>'
-        )
-        result = self._transform(
-            '<ac:structured-macro ac:name="diagrams.net">'
-            f'<ac:plain-text-body><![CDATA[{drawio_xml}]]></ac:plain-text-body>'
-            '</ac:structured-macro>'
-        )
-
-        self.assertIn("Nur Text A", result.body_markdown)
-        self.assertIn("Nur Text B", result.body_markdown)
-        self.assertNotIn("### Beziehungen", result.body_markdown)
-
-    def test_drawio_html_labels_are_cleaned(self) -> None:
-        drawio_xml = (
-            '<mxGraphModel><root>'
-            '<mxCell id="0"/><mxCell id="1" parent="0"/>'
-            '<mxCell id="2" value="&lt;div&gt;API &amp;amp; Gateway&lt;br&gt;Prod&lt;/div&gt;" vertex="1" parent="1"/>'
-            '</root></mxGraphModel>'
-        )
-        result = self._transform(
-            '<ac:structured-macro ac:name="inc-drawio">'
-            f'<ac:plain-text-body><![CDATA[{drawio_xml}]]></ac:plain-text-body>'
-            '</ac:structured-macro>'
-        )
-
-        self.assertIn("API & Gateway", result.body_markdown)
-        self.assertIn("Prod", result.body_markdown)
-
-    def test_drawio_broken_payload_emits_warning_and_fallback(self) -> None:
-        result = self._transform(
-            '<ac:structured-macro ac:name="draw.io">'
-            '<ac:plain-text-body><![CDATA[not-a-valid-drawio-content]]></ac:plain-text-body>'
-            '</ac:structured-macro>'
-        )
-
-        self.assertIn("Draw.io-Diagramm erkannt, aber nicht extrahierbar.", result.body_markdown)
-        self.assertTrue(any(w.code == "drawio_decode_failed" for w in result.transform_warnings))
-
-    def test_drawio_deduplicates_identical_texts(self) -> None:
-        drawio_xml = (
-            '<mxGraphModel><root>'
-            '<mxCell id="0"/><mxCell id="1" parent="0"/>'
-            '<mxCell id="2" value="Billing Service" vertex="1" parent="1"/>'
-            '<mxCell id="3" value="Billing Service" vertex="1" parent="1"/>'
-            '</root></mxGraphModel>'
-        )
-        result = self._transform(
-            '<ac:structured-macro ac:name="drawio">'
-            f'<ac:plain-text-body><![CDATA[{drawio_xml}]]></ac:plain-text-body>'
-            '</ac:structured-macro>'
-        )
-
-        self.assertEqual(result.body_markdown.count("- Billing Service"), 1)
-
-    def test_drawio_ignores_technical_cells_without_value(self) -> None:
-        drawio_xml = (
-            '<mxGraphModel><root>'
-            '<mxCell id="0"/><mxCell id="1" parent="0"/>'
-            '<mxCell id="2" vertex="1" parent="1"/>'
-            '<mxCell id="3" edge="1" parent="1" source="2" target="1"/>'
-            '</root></mxGraphModel>'
-        )
-        result = self._transform(
-            '<ac:structured-macro ac:name="drawio">'
-            f'<ac:plain-text-body><![CDATA[{drawio_xml}]]></ac:plain-text-body>'
-            '</ac:structured-macro>'
-        )
-
-        self.assertIn("Draw.io-Diagramm erkannt, aber kein extrahierbarer semantischer Inhalt gefunden.", result.body_markdown)
-        self.assertTrue(any(w.code == "drawio_no_semantic_content" for w in result.transform_warnings))
+        self.assertIn("Vorher", result.body_markdown)
+        self.assertIn("Nachher", result.body_markdown)
+        for macro_name in ["drawio", "draw.io", "diagrams.net", "inc-drawio"]:
+            self.assertNotIn(macro_name, result.unsupported_macros)
+        self.assertFalse(any(w.code.startswith("drawio_") for w in result.transform_warnings))
 
 
 if __name__ == "__main__":
