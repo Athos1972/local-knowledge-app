@@ -346,6 +346,66 @@ class ConfluenceMacroTransformerTests(unittest.TestCase):
         self.assertNotIn("macrosuite-cards", result.unsupported_macros)
         self.assertNotIn("classifications-combined-taxonomy", result.unsupported_macros)
 
+
+    def test_additional_ignored_macros_are_removed_without_warning(self) -> None:
+        result = self._transform(
+            '<p>Vorher</p>'
+            '<ac:structured-macro ac:name="content-report-table"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="table-excerpt"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="table-excerpt-include"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="attachments"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="table-joiner"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="excerpt"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="gadget"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="multiexcerpt-include"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="change-history"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="include"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="pagetree"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="recently-updated"></ac:structured-macro>'
+            '<ac:structured-macro ac:name="c4c-property-report"></ac:structured-macro>'
+            '<p>Nachher</p>'
+        )
+
+        self.assertIn("Vorher", result.body_markdown)
+        self.assertIn("Nachher", result.body_markdown)
+        for macro_name in [
+            "content-report-table",
+            "table-excerpt",
+            "table-excerpt-include",
+            "attachments",
+            "table-joiner",
+            "excerpt",
+            "gadget",
+            "multiexcerpt-include",
+            "change-history",
+            "include",
+            "pagetree",
+            "recently-updated",
+            "c4c-property-report",
+        ]:
+            self.assertNotIn(macro_name, result.unsupported_macros)
+        self.assertFalse(any(w.code == "unsupported_macro" for w in result.transform_warnings))
+
+    def test_pivot_code_flowchart_are_unwrapped_and_content_is_processed(self) -> None:
+        result = self._transform(
+            '<ac:structured-macro ac:name="pivot-table">'
+            '<ac:rich-text-body><table><tr><th>X</th><th>Y</th></tr><tr><td>1</td><td>2</td></tr></table></ac:rich-text-body>'
+            '</ac:structured-macro>'
+            '<ac:structured-macro ac:name="code">'
+            '<ac:plain-text-body><![CDATA[print("hello")]]></ac:plain-text-body>'
+            '</ac:structured-macro>'
+            '<ac:structured-macro ac:name="flowchart">'
+            '<ac:plain-text-body><![CDATA[A -> B]]></ac:plain-text-body>'
+            '</ac:structured-macro>'
+        )
+
+        self.assertTrue("| X | Y |" in result.body_markdown or "- **X:** Y" in result.body_markdown)
+        self.assertIn('print("hello")', result.body_markdown)
+        self.assertIn("A -> B", result.body_markdown)
+        self.assertNotIn("pivot-table", result.unsupported_macros)
+        self.assertNotIn("code", result.unsupported_macros)
+        self.assertNotIn("flowchart", result.unsupported_macros)
+
     def test_drawio_direct_xml_extracts_elements_and_relationships(self) -> None:
         drawio_xml = (
             '<mxGraphModel><root>'

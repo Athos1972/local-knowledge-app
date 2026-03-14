@@ -28,6 +28,19 @@ IGNORED_MACROS = {
     "children",
     "classifications-status",
     "detailssummary",
+    "content-report-table",
+    "table-excerpt",
+    "table-excerpt-include",
+    "attachments",
+    "table-joiner",
+    "excerpt",
+    "gadget",
+    "multiexcerpt-include",
+    "change-history",
+    "include",
+    "pagetree",
+    "recently-updated",
+    "c4c-property-report",
 }
 DRAWIO_MACRO_NAMES = {"drawio", "draw.io", "diagrams.net", "inc-drawio"}
 SUPPORTED_SIMPLE = {
@@ -53,6 +66,9 @@ SUPPORTED_SIMPLE = {
     "classifications-combined-taxonomy",
     "macrosuite-panel",
     "section",
+    "pivot-table",
+    "code",
+    "flowchart",
 }
 VALID_MACRO_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{1,80}$")
 TASK_LIST_PATTERN = re.compile(r"<ac:task-list>(.*?)</ac:task-list>", re.DOTALL | re.IGNORECASE)
@@ -169,6 +185,9 @@ class MacroTransformer:
         transformed = self._unwrap_table_like_macro(transformed, "classifications-combined-taxonomy")
         transformed = self._unwrap_table_like_macro(transformed, "macrosuite-panel")
         transformed = self._unwrap_table_like_macro(transformed, "section")
+        transformed = self._unwrap_table_like_macro(transformed, "pivot-table")
+        transformed = self._unwrap_macro_content(transformed, "code")
+        transformed = self._unwrap_macro_content(transformed, "flowchart")
         transformed = self._replace_jira_macro(transformed, warnings)
         transformed = self._replace_view_file_macro(transformed, warnings)
         transformed = self._replace_drawio_macro(transformed, warnings)
@@ -297,6 +316,10 @@ class MacroTransformer:
 
     def _unwrap_table_like_macro(self, text: str, macro_name: str) -> str:
         """Entfernt Wrapper-Makros um Tabellen und lässt den Rich-Text-Inhalt stehen."""
+        return self._unwrap_macro_content(text, macro_name, rich_text_only=True)
+
+    def _unwrap_macro_content(self, text: str, macro_name: str, *, rich_text_only: bool = False) -> str:
+        """Entfernt Wrapper-Makros und behält – je nach Makro – den relevanten Inhalt bei."""
         pattern = re.compile(
             rf"<ac:structured-macro[^>]*ac:name=\"{re.escape(macro_name)}\"[^>]*>(.*?)</ac:structured-macro>",
             re.DOTALL,
@@ -307,6 +330,13 @@ class MacroTransformer:
             body_match = re.search(r"<ac:rich-text-body>(.*?)</ac:rich-text-body>", block, re.DOTALL)
             if body_match:
                 return body_match.group(1)
+
+            if rich_text_only:
+                return ""
+
+            plain_body_match = re.search(r"<ac:plain-text-body><!\[CDATA\[(.*?)\]\]></ac:plain-text-body>", block, re.DOTALL)
+            if plain_body_match:
+                return plain_body_match.group(1)
             return ""
 
         return pattern.sub(repl, text)
