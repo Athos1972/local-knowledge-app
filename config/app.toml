@@ -121,3 +121,22 @@ max_file_size_mb = 20
 settings = "settings_local.yml"
 sources = "sources_local.yml"
 terms = "terms_local.yml"
+
+[documents_transform]
+input_root = "~/local-knowledge-data/exports/documents"
+output_root = "~/local-knowledge-data/staging/documents"
+publish_root = "~/local-knowledge-data/ingest/domains"
+manifests_dir = "~/local-knowledge-data/system/documents_transform"
+fallback_domain = "misc_documents"
+
+[[documents_transform.mapping]]
+match = "sharepoint/*/projektmanagement/**"
+domain = "project_management"
+
+[[documents_transform.mapping]]
+match = "sharepoint/*/architektur/**"
+domain = "architecture"
+
+[[documents_transform.mapping]]
+match = "book/arisca/**"
+domain = "arisca"
