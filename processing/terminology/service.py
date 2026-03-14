@@ -34,6 +34,9 @@ class TerminologyService:
         self._candidate_exclude_patterns: list[str] = []
         self._file_names = resolve_terminology_file_names()
         self._loaded = False
+        self._candidate_rows_loaded = False
+        self._candidate_rows_by_key: dict[tuple[str, str], CandidateRow] = {}
+        self._candidate_report_dirty = False
 
     def apply_to_text(self, text: str, source_type: str, *, source_ref: str = "") -> TerminologyResult:
         if not self._ensure_loaded():
@@ -205,7 +208,8 @@ class TerminologyService:
         source_ref: str,
         mentions: dict[str, list[re.Match[str]]],
     ) -> None:
-        """Merge current document candidates into the aggregated candidate CSV."""
+        """Merge current document candidates into the in-memory aggregated candidate report."""
+        self._ensure_candidate_rows_loaded()
         known = {m.group(0).lower() for matches in mentions.values() for m in matches}
         candidate_counts: Counter[str] = Counter()
         candidate_examples: dict[str, str] = {}
@@ -227,25 +231,18 @@ class TerminologyService:
 
         if not candidate_counts:
             logger.info(
-                "terminology candidates updated: source=%s new_terms=0 merged_terms=0 excluded_terms=%s csv_rows=%s",
+                "terminology candidates updated: source=%s new_terms=0 merged_terms=0 excluded_terms=%s pending_rows=%s",
                 source_type,
                 excluded_terms,
-                len(self._read_candidate_rows(self._reports_root / 'terminology_candidates.csv')),
+                len(self._candidate_rows_by_key),
             )
             return
-
-        self._reports_root.mkdir(parents=True, exist_ok=True)
-        path = self._reports_root / "terminology_candidates.csv"
-        existing_rows = self._read_candidate_rows(path)
-        existing_index: dict[tuple[str, str], CandidateRow] = {
-            (row.source_type, self._normalize_candidate_term(row.term)): row for row in existing_rows
-        }
 
         new_terms = 0
         merged_terms = 0
         for term, count in sorted(candidate_counts.items()):
             key = (source_type, self._normalize_candidate_term(term))
-            row = existing_index.get(key)
+            row = self._candidate_rows_by_key.get(key)
             if row is None:
                 new_terms += 1
                 row = CandidateRow(
@@ -256,8 +253,7 @@ class TerminologyService:
                     last_seen_file=source_ref,
                     example_context=candidate_examples.get(term, ""),
                 )
-                existing_rows.append(row)
-                existing_index[key] = row
+                self._candidate_rows_by_key[key] = row
                 continue
 
             merged_terms += 1
@@ -277,16 +273,51 @@ class TerminologyService:
                 row.count,
             )
 
-        existing_rows.sort(key=lambda row: (row.source_type, self._normalize_candidate_term(row.term), row.term))
-        self._write_candidate_rows(path, existing_rows)
+        self._candidate_report_dirty = True
         logger.info(
-            "terminology candidates updated: source=%s new_terms=%s merged_terms=%s excluded_terms=%s csv_rows=%s",
+            "terminology candidates updated: source=%s new_terms=%s merged_terms=%s excluded_terms=%s pending_rows=%s",
             source_type,
             new_terms,
             merged_terms,
             excluded_terms,
-            len(existing_rows),
+            len(self._candidate_rows_by_key),
         )
+
+    def finalize_candidate_report(self) -> Path | None:
+        """Write the aggregated candidate report exactly once at run end.
+
+        Returns the report path when a CSV has been written, otherwise ``None``.
+        """
+        self._ensure_candidate_rows_loaded()
+        path = self._reports_root / "terminology_candidates.csv"
+        rows = sorted(
+            self._candidate_rows_by_key.values(),
+            key=lambda row: (row.source_type, self._normalize_candidate_term(row.term), row.term),
+        )
+
+        if not rows:
+            logger.info("Terminology report finalization skipped: no candidates to write.")
+            return None
+
+        if not self._candidate_report_dirty and path.exists():
+            logger.info("Terminology report already up to date: path=%s rows=%s", path, len(rows))
+            return path
+
+        self._reports_root.mkdir(parents=True, exist_ok=True)
+        self._write_candidate_rows(path, rows)
+        self._candidate_report_dirty = False
+        logger.info("Terminology report written: path=%s rows=%s", path, len(rows))
+        return path
+
+    def _ensure_candidate_rows_loaded(self) -> None:
+        if self._candidate_rows_loaded:
+            return
+
+        path = self._reports_root / "terminology_candidates.csv"
+        for row in self._read_candidate_rows(path):
+            key = (row.source_type, self._normalize_candidate_term(row.term))
+            self._candidate_rows_by_key[key] = row
+        self._candidate_rows_loaded = True
 
     def _extract_context(self, text: str, start: int, end: int) -> str:
         left = max(0, start - 40)

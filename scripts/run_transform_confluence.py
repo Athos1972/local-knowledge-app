@@ -302,6 +302,20 @@ def main() -> int:
             )
             logger.exception("Fehler bei Seite page_id=%s: %s", page.page_id, exc)
 
+
+    logger.info("Finalisiere Terminologie-Kandidatenreport am Laufende.")
+    try:
+        report_path = transformer.finalize_terminology_report()
+        if report_path is None:
+            logger.info("Terminologie-Kandidatenreport: keine Kandidaten, nichts geschrieben.")
+        else:
+            exists_flag = report_path.exists()
+            logger.info("Terminologie-Kandidatenreport finalisiert: path=%s exists=%s", report_path, exists_flag)
+    except Exception as exc:  # noqa: BLE001
+        # Report-Schreibfehler markieren den Run bewusst als fehlerhaft, da ein erwartetes Artefakt fehlt.
+        manifest.pages_failed += 1
+        logger.exception("Fehler beim Finalisieren des Terminologie-Kandidatenreports: %s", exc)
+
     manifest.finished_at = utc_now_iso()
     manifest.run_duration = perf_counter() - started_perf
     manifest.run_duration_human = format_duration_human(manifest.run_duration)
