@@ -176,6 +176,30 @@ class ConfluenceTableTransformerTests(unittest.TestCase):
         self.assertNotIn("Bitte aus der 3. Spalte", result.body_markdown)
         self.assertEqual("SOLL", result.page_properties["priorität"])
 
+    def test_complex_page_properties_table_ignores_third_column_in_extra_document(self) -> None:
+        page = ConfluenceRawPage(
+            page_id="7",
+            space_key="DOC",
+            title="Seiteneigenschaften",
+            body=(
+                "<table>"
+                "<tr><th>Priorität</th><td>SOLL</td><td colspan=\"2\">## hier klicken um zu erweitern...</td></tr>"
+                "<tr><th>Status</th><td>Neu</td><td>## hier klicken um zu erweitern...</td></tr>"
+                "</table>"
+            ),
+            source_ref="dummy",
+        )
+
+        result = ConfluenceTransformer().transform(page)
+
+        self.assertEqual(1, len(result.extra_documents))
+        extra = result.extra_documents[0]
+        self.assertIn("## Inhalt (konservativ abgeflacht)", extra.body_markdown)
+        self.assertIn("Zelle 1=Priorität | Zelle 2=SOLL", extra.body_markdown)
+        self.assertIn("Zelle 1=Status | Zelle 2=Neu", extra.body_markdown)
+        self.assertNotIn("Zelle 3", extra.body_markdown)
+        self.assertNotIn("hier klicken um zu erweitern", extra.body_markdown)
+
 
 if __name__ == "__main__":
     unittest.main()

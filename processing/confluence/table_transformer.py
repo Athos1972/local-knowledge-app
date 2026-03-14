@@ -264,7 +264,12 @@ class TableTransformer:
             "## Inhalt (konservativ abgeflacht)",
             "",
         ]
-        lines.extend(self._flatten_rows(table.rows))
+        lines.extend(
+            self._flatten_rows(
+                table.rows,
+                restrict_to_key_value_columns=self._is_page_properties_title(page_title),
+            )
+        )
         if not lines[-1]:
             body = "\n".join(lines)
         else:
@@ -291,15 +296,21 @@ class TableTransformer:
             metadata=metadata,
         )
 
-    def _flatten_rows(self, rows: list[list[TableCell]]) -> list[str]:
+    def _flatten_rows(self, rows: list[list[TableCell]], *, restrict_to_key_value_columns: bool = False) -> list[str]:
         if not rows:
             return ["- Keine auslesbaren Zeilen gefunden.", ""]
 
-        has_header = all(cell.is_header for cell in rows[0]) and len(rows) > 1
+        rows_to_render = rows
+        if restrict_to_key_value_columns:
+            projected_rows = self._project_key_value_rows(rows)
+            if projected_rows:
+                rows_to_render = projected_rows
+
+        has_header = all(cell.is_header for cell in rows_to_render[0]) and len(rows_to_render) > 1
         if has_header:
-            headers = [cell.text.strip() or f"Spalte {idx + 1}" for idx, cell in enumerate(rows[0])]
+            headers = [cell.text.strip() or f"Spalte {idx + 1}" for idx, cell in enumerate(rows_to_render[0])]
             lines = []
-            for row_idx, row in enumerate(rows[1:], start=1):
+            for row_idx, row in enumerate(rows_to_render[1:], start=1):
                 pairs = []
                 for col_idx, cell in enumerate(row):
                     key = headers[col_idx] if col_idx < len(headers) else f"Spalte {col_idx + 1}"
@@ -311,7 +322,7 @@ class TableTransformer:
             return lines + [""]
 
         fallback_lines = []
-        for row_idx, row in enumerate(rows, start=1):
+        for row_idx, row in enumerate(rows_to_render, start=1):
             values = []
             for col_idx, cell in enumerate(row, start=1):
                 value = cell.text.strip() or "(leer)"
@@ -320,6 +331,10 @@ class TableTransformer:
                 values.append(f"Zelle {col_idx}={value}")
             fallback_lines.append(f"- Originalzeile {row_idx}: " + " | ".join(values))
         return fallback_lines + [""]
+
+    def _is_page_properties_title(self, title: str) -> bool:
+        normalized = normalize_property_key(title)
+        return "seiteneigenschaft" in normalized
 
     def _is_key_value_table(self, table: ParsedTable) -> bool:
         """Erkennt konservativ Key-Value-/Page-Properties-Tabellen."""
