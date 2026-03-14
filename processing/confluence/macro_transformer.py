@@ -41,6 +41,10 @@ IGNORED_MACROS = {
     "pagetree",
     "recently-updated",
     "c4c-property-report",
+    "lastpageupdate",
+    "glossary-navigation-bar",
+    "macrosuite-button",
+    "excerpt-include"
 }
 DRAWIO_MACRO_NAMES = {"drawio", "draw.io", "diagrams.net", "inc-drawio"}
 SUPPORTED_SIMPLE = {
