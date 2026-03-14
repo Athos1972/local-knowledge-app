@@ -32,6 +32,7 @@ class MarkdownRenderer:
             "unsupported_macros": page.unsupported_macros,
             "parent_title": page.parent_title or "",
             "ancestors": page.ancestors,
+            **page.promoted_properties,
             "page_properties": page.page_properties,
             "content_hash": page.content_hash,
         }

@@ -26,10 +26,11 @@ class ConfluenceTableTransformerTests(unittest.TestCase):
 
         result = ConfluenceTransformer().transform(page)
 
-        self.assertIn("- **Status:** In Arbeit", result.body_markdown)
+        self.assertNotIn("- **Status:** In Arbeit", result.body_markdown)
         self.assertIn("- **Stream:** Abrechnung", result.body_markdown)
         self.assertIn("- **Owner:** Max Mustermann", result.body_markdown)
         self.assertEqual("In Arbeit", result.page_properties["status"])
+        self.assertEqual("In Arbeit", result.promoted_properties["status"])
         self.assertEqual("Abrechnung", result.page_properties["stream"])
         self.assertEqual("Max Mustermann", result.page_properties["owner"])
         self.assertEqual("existing_value", result.page_properties["existing_key"])
@@ -53,6 +54,7 @@ class ConfluenceTableTransformerTests(unittest.TestCase):
         result = ConfluenceTransformer().transform(page)
 
         self.assertEqual("Done", result.page_properties["status"])
+        self.assertEqual("Done", result.promoted_properties["status"])
         self.assertEqual("Max Mustermann", result.page_properties["owner"])
 
     def test_regular_table_remains_markdown_table(self) -> None:
@@ -98,6 +100,29 @@ class ConfluenceTableTransformerTests(unittest.TestCase):
         self.assertTrue(extra.metadata.get("table_complexity"))
         self.assertEqual(1, extra.metadata.get("table_index"))
         self.assertTrue(any(w.code == "complex_table" for w in result.transform_warnings))
+
+    def test_promoted_properties_cover_aliases_and_lists(self) -> None:
+        page = ConfluenceRawPage(
+            page_id="4",
+            space_key="DOC",
+            title="Seiteneigenschaften",
+            body=(
+                "<table>"
+                "<tr><td>Prio</td><td>Hoch</td></tr>"
+                "<tr><td>Betroffene Einheiten</td><td>Sales, Billing; Ops</td></tr>"
+                "<tr><td>Status</td><td><ac:structured-macro ac:name=\"status\"><ac:parameter ac:name=\"title\">In Arbeit</ac:parameter></ac:structured-macro></td></tr>"
+                "</table>"
+            ),
+            source_ref="dummy",
+        )
+
+        result = ConfluenceTransformer().transform(page)
+
+        self.assertEqual("Hoch", result.promoted_properties["priorität"])
+        self.assertEqual(["Sales", "Billing", "Ops"], result.promoted_properties["betroffene einheiten"])
+        self.assertEqual("In Arbeit", result.promoted_properties["status"])
+        self.assertNotIn("- **Prio:**", result.body_markdown)
+        self.assertNotIn("- **Status:**", result.body_markdown)
 
 
 if __name__ == "__main__":

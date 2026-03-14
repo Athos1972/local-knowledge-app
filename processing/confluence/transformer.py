@@ -9,6 +9,10 @@ import re
 from processing.confluence.link_transformer import LinkTransformer
 from processing.confluence.macro_transformer import MacroTransformer
 from processing.confluence.models import ConfluenceRawPage, ConfluenceTransformedPage, TransformWarning
+from processing.confluence.page_properties import (
+    build_frontmatter_promoted_properties,
+    load_property_promotion_rules,
+)
 from processing.confluence.table_transformer import TableTransformer
 from processing.confluence.writer import ConfluenceTransformWriter
 from sources.document import stable_hash
@@ -22,7 +26,8 @@ class ConfluenceTransformer:
 
     def __init__(self) -> None:
         self.macro_transformer = MacroTransformer()
-        self.table_transformer = TableTransformer()
+        self.property_promotion_rules = load_property_promotion_rules()
+        self.table_transformer = TableTransformer(self.property_promotion_rules)
         self.link_transformer = LinkTransformer()
 
     def transform(self, page: ConfluenceRawPage) -> ConfluenceTransformedPage:
@@ -49,6 +54,7 @@ class ConfluenceTransformer:
             warnings=warnings,
         )
         merged_page_properties = self._merge_page_properties(page.page_properties, extracted_properties)
+        promoted_properties = build_frontmatter_promoted_properties(merged_page_properties, self.property_promotion_rules)
 
         if key_value_count:
             logger.debug("Seite %s: %s Key-Value-Tabellen erkannt.", page.page_id, key_value_count)
@@ -75,6 +81,7 @@ class ConfluenceTransformer:
             parent_title=page.parent_title,
             ancestors=page.ancestors,
             page_properties=merged_page_properties,
+            promoted_properties=promoted_properties,
             attachments=page.attachments,
             transform_warnings=warnings,
             unsupported_macros=unsupported,
