@@ -40,6 +40,7 @@ class ConfluenceRawPage:
     parent_title: str | None = None
     ancestors: list[str] = field(default_factory=list)
     page_properties: dict[str, Any] = field(default_factory=dict)
+    promoted_properties: dict[str, Any] = field(default_factory=dict)
     attachments: list[dict[str, Any]] = field(default_factory=list)
     raw_metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -61,6 +62,7 @@ class ConfluenceTransformedPage:
     parent_title: str | None = None
     ancestors: list[str] = field(default_factory=list)
     page_properties: dict[str, Any] = field(default_factory=dict)
+    promoted_properties: dict[str, Any] = field(default_factory=dict)
     attachments: list[dict[str, Any]] = field(default_factory=list)
     transform_warnings: list[TransformWarning] = field(default_factory=list)
     unsupported_macros: list[str] = field(default_factory=list)

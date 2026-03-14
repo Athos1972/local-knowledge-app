@@ -129,5 +129,35 @@ class ConfluenceMacroTransformerTests(unittest.TestCase):
         self.assertIn("outer", result.unsupported_macros)
 
 
+    def test_table_chart_and_table_transformer_unwrap_table_content(self) -> None:
+        result = self._transform(
+            '<ac:structured-macro ac:name="table-transformer">'
+            '<ac:rich-text-body>'
+            '<ac:structured-macro ac:name="table-chart">'
+            '<ac:rich-text-body>'
+            '<table><tr><th>X</th><th>Y</th></tr><tr><td>1</td><td>2</td></tr></table>'
+            '</ac:rich-text-body>'
+            '</ac:structured-macro>'
+            '</ac:rich-text-body>'
+            '</ac:structured-macro>'
+        )
+
+        self.assertTrue("| X | Y |" in result.body_markdown or "- **X:** Y" in result.body_markdown)
+        self.assertNotIn("table-chart", result.unsupported_macros)
+        self.assertNotIn("table-transformer", result.unsupported_macros)
+
+    def test_page_properties_report_is_ignored_without_warning(self) -> None:
+        result = self._transform(
+            '<p>Intro</p>'
+            '<ac:structured-macro ac:name="page-properties-report"></ac:structured-macro>'
+            '<p>Outro</p>'
+        )
+
+        self.assertIn("Intro", result.body_markdown)
+        self.assertIn("Outro", result.body_markdown)
+        self.assertNotIn("page-properties-report", result.unsupported_macros)
+        self.assertFalse(any(w.code == "unsupported_macro" for w in result.transform_warnings))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,13 @@ import logging
 import re
 
 from processing.confluence.models import ConfluenceExtraDocument, TransformWarning
+from processing.confluence.page_properties import (
+    PropertyPromotionRule,
+    filtered_renderable_property_keys,
+    match_promoted_key,
+    normalize_property_key,
+    normalize_property_value,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -58,18 +65,26 @@ class _TableParser(HTMLParser):
         self.has_span_complexity = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = {key: value for key, value in attrs}
         if tag == "tr":
             self._current_row = []
         if tag in {"td", "th"}:
             self._in_cell = True
             self._cell_buffer = []
             self._current_cell_is_header = tag == "th"
-            attr_map = {key: value for key, value in attrs}
             self._current_colspan = self._parse_span(attr_map.get("colspan"))
             self._current_rowspan = self._parse_span(attr_map.get("rowspan"))
             if self._current_colspan > 1 or self._current_rowspan > 1:
                 self.has_span_complexity = True
             self._current_cell_complex = False
+            return
+
+        if self._in_cell and tag == "ri:user":
+            display_name = (attr_map.get("ri:display-name") or "").strip()
+            if display_name:
+                self._cell_buffer.append(display_name)
+            else:
+                self._cell_buffer.append("Benutzer")
             return
 
         if self._in_cell and tag == "table":
@@ -117,6 +132,9 @@ class _TableParser(HTMLParser):
 
 class TableTransformer:
     """Klassifiziert Tabellen und rendert konservativ in Markdown."""
+
+    def __init__(self, promotion_rules: dict[str, PropertyPromotionRule] | None = None) -> None:
+        self._promotion_rules = promotion_rules or {}
 
     def transform(
         self,
@@ -341,8 +359,8 @@ class TableTransformer:
         """Erkennt tabellarische Kopfzeilen wie `Key | Value` konservativ."""
         if len(row) != 2:
             return False
-        left = self._normalize_frontmatter_key(row[0].text)
-        right = self._normalize_frontmatter_key(row[1].text)
+        left = normalize_property_key(row[0].text)
+        right = normalize_property_key(row[1].text)
         return left in {"key", "field", "name", "property"} and right in {"value", "wert"}
 
     def _is_label_like(self, value: str) -> bool:
@@ -359,13 +377,33 @@ class TableTransformer:
     def _as_key_value(self, rows: list[list[TableCell]]) -> tuple[str, dict[str, str]]:
         lines = [""]
         properties: dict[str, str] = {}
+        key_value_pairs: list[tuple[str, str]] = []
         for row in rows:
             key_raw = row[0].text.strip()
             value_raw = row[1].text.strip()
-            lines.append(f"- **{key_raw}:** {value_raw}")
-            normalized_key = self._normalize_frontmatter_key(key_raw)
+            key_value_pairs.append((key_raw, value_raw))
+
+            promoted_match = match_promoted_key(key_raw, self._promotion_rules)
+            if promoted_match:
+                canonical_key, rule = promoted_match
+                normalized_value = normalize_property_value(value_raw, list_value=rule.list_value)
+                if normalized_value is not None and canonical_key not in properties:
+                    if isinstance(normalized_value, list):
+                        properties[canonical_key] = ", ".join(normalized_value)
+                    else:
+                        properties[canonical_key] = normalized_value
+                continue
+
+            normalized_key = normalize_property_key(key_raw)
             if normalized_key and normalized_key not in properties and value_raw:
                 properties[normalized_key] = value_raw
+
+        hidden_keys = filtered_renderable_property_keys(key_value_pairs, self._promotion_rules)
+        for key_raw, value_raw in key_value_pairs:
+            if key_raw in hidden_keys:
+                continue
+            lines.append(f"- **{key_raw}:** {value_raw}")
+
         lines.append("")
         return "\n".join(lines), properties
 
@@ -383,20 +421,6 @@ class TableTransformer:
             lines.append("| " + " | ".join(self._escape_cell(cell.text) for cell in row) + " |")
         lines.append("")
         return "\n".join(lines)
-
-    @staticmethod
-    def _normalize_frontmatter_key(value: str) -> str:
-        """Normalisiert einen Label-Text zu einem snake_case-Key."""
-        lowered = value.strip().lower()
-        lowered = (
-            lowered.replace("ä", "ae")
-            .replace("ö", "oe")
-            .replace("ü", "ue")
-            .replace("ß", "ss")
-        )
-        normalized = re.sub(r"[^a-z0-9\s-]", "", lowered)
-        collapsed = re.sub(r"[-\s]+", "_", normalized).strip("_")
-        return collapsed
 
     @staticmethod
     def _escape_cell(cell: str) -> str:

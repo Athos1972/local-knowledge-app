@@ -52,6 +52,8 @@ def main() -> int:
     output_root = Path(args.output_root).expanduser() if args.output_root else AppConfig.get_path(None, "confluence_transform", "output_root", default=str(default_output_root))
     manifests_dir = AppConfig.get_path(None, "confluence_transform", "manifests_dir", default=str(data_root / "system" / "confluence_transform"))
 
+    minimum_chars_in_raw_page = int(AppConfig.get("confluence_transform", "minimum_number_of_raw_characters_in_page", default=0) or 0)
+
     mode = "full" if args.full_refresh else "incremental"
     effective_run_id = args.run_id or generate_transform_run_id()
     manifest = TransformRunManifest(run_id=effective_run_id, started_at=utc_now_iso(), mode=mode)
@@ -101,10 +103,44 @@ def main() -> int:
             document_title=page.title,
         ) as load_evt:
             load_evt.event.output_count = len(page.body)
+        output_path = writer.build_output_path(page.space_key, page.page_id, page.title)
+
+        if minimum_chars_in_raw_page > 0 and len(page.body) < minimum_chars_in_raw_page:
+            logger.debug(
+                "Seite hatte %s Zeichen. Limit %s. Übersprungen.",
+                len(page.body),
+                minimum_chars_in_raw_page,
+            )
+            with audit.stage(
+                run_id=run_context.run_id,
+                source_type="confluence",
+                source_instance=args.source_instance,
+                stage=AuditStage.FILTER,
+                document_id=page.page_id,
+                document_uri=page.source_ref,
+                document_title=page.title,
+                extra_json={"changed_flag": False, "is_dirty": False},
+            ) as filter_evt:
+                filter_evt.skipped(ReasonCode.TOO_SMALL_FOR_CHUNKING, "Seite unter Mindestzeichenanzahl")
+
+            manifest.pages_skipped += 1
+            manifest.records.append(
+                TransformRecord(
+                    page_id=page.page_id,
+                    title=page.title,
+                    source_ref=page.source_ref,
+                    output_file=str(output_path),
+                    source_checksum="",
+                    output_checksum="",
+                    warning_count=0,
+                    status="skipped",
+                )
+            )
+            continue
+
         source_checksum = stable_hash("|".join([page.title, page.body, page.updated_at or "", ",".join(page.labels)]))
         old = state.pages.get(page.page_id)
 
-        output_path = writer.build_output_path(page.space_key, page.page_id, page.title)
         if not args.full_refresh and old and old.source_checksum == source_checksum and Path(old.output_file).exists():
             with audit.stage(
                 run_id=run_context.run_id,
