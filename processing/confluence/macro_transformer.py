@@ -171,6 +171,7 @@ class MacroTransformer:
         transformed = self._replace_status_macro(transformed)
         transformed = self._replace_task_items(transformed)
         transformed = self._remove_toc_macro(transformed)
+        transformed = self._remove_placeholder_macro(transformed)
         transformed = self._remove_ignored_macros(transformed)
         transformed = self._remove_page_properties_report_macro(transformed)
         transformed = self._replace_plantuml_macro(transformed, warnings)
@@ -271,6 +272,11 @@ class MacroTransformer:
             re.DOTALL,
         )
         return pattern.sub("", text)
+
+    def _remove_placeholder_macro(self, text: str) -> str:
+        """Entfernt Formularvorlagetexte vollständig (<ac:placeholder>...</ac:placeholder>)."""
+        without_block = re.sub(r"<ac:placeholder\b[^>]*>.*?</ac:placeholder>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        return re.sub(r"<ac:placeholder\b[^>]*/>", "", without_block, flags=re.IGNORECASE)
 
     def _remove_ignored_macros(self, text: str) -> str:
         """Entfernt explizit ignorierte Makros ohne Warnung und ohne Ersatzinhalt."""
