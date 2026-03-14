@@ -4,6 +4,35 @@
 Die App lädt Markdown-Dateien aus einem separaten Daten-Repo, normalisiert Inhalte,
 chunkt Texte und bietet lokale Suche, Ask-/Prompt-Aufbereitung sowie eine **optionale** LLM-Ausführung.
 
+
+## Streamlit Local-First UI + LlamaIndex Engine (neu)
+
+Zusätzlich zur bestehenden Pipeline gibt es jetzt eine modulare UI/Engine-Schicht:
+
+- `ingestion.py`: liest Markdown-Dateien rekursiv und übernimmt Frontmatter (`source`, `jira_status`, `date`, `source_link`) als Metadaten.
+- `engine.py`: baut den LlamaIndex `VectorStoreIndex` mit **Qdrant** (Default) oder **Chroma**, kombiniert **Hybrid Search** (BM25 + Vektor) und führt danach ein Reranking mit `BAAI/bge-reranker-v2-m3` (Top-100 → Top-7) durch.
+- `app.py`: Streamlit Chat-UI (`st.chat_message`) mit Sidebar für Modellwahl, Quellenfilter (Jira/Confluence/Web), Vector-Backend und `Similarity Top-K`.
+
+### Schnellstart UI
+
+```bash
+pip install -r requirements.txt
+ollama serve
+ollama pull llama3:8b
+ollama pull nomic-embed-text
+streamlit run app.py
+```
+
+Optionale ENV-Variablen:
+
+- `LKA_DATA_DIR` (Default `./data`)
+- `LKA_EMBEDDING_MODEL` (Default `nomic-embed-text`)
+
+Hinweise für Apple Silicon (Mac Studio):
+
+- Der Reranker verwendet bevorzugt `mps` und fällt ansonsten auf `cpu`/`cuda` zurück.
+- `PYTORCH_ENABLE_MPS_FALLBACK=1` wird automatisch gesetzt, um robuste Ausführung zu ermöglichen.
+
 ## Offline-first Zielbild (neu)
 
 Die Runtime ist jetzt standardmäßig vollständig lokal über **Ollama**:
