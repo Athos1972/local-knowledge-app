@@ -178,6 +178,21 @@ def test_candidates_are_aggregated_and_counted(tmp_path: Path) -> None:
     assert rows[0]["last_seen_file"] == "doc-2.md"
 
 
+def test_hyphenated_candidates_keep_full_term_without_trailing_dash(tmp_path: Path) -> None:
+    _write_configs(tmp_path)
+    reports_root = tmp_path / "reports"
+    service = TerminologyService(config_root=tmp_path / "config" / "terminology", reports_root=reports_root)
+
+    service.apply_to_text("SAP-IS-U PREWS-Refinement SAP-", "confluence", source_ref="doc-1.md")
+    service.finalize_candidate_report()
+
+    rows = _read_candidates(reports_root / "terminology_candidates.csv")
+    terms = {row["term"] for row in rows}
+    assert "SAP-IS-U" in terms
+    assert "PREWS-Refinement" in terms
+    assert "SAP-" not in terms
+
+
 def test_candidates_aggregate_case_insensitive_and_whitespace_normalized(tmp_path: Path) -> None:
     cfg = tmp_path / "config" / "terminology"
     cfg.mkdir(parents=True, exist_ok=True)

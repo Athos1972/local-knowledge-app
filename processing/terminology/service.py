@@ -40,7 +40,9 @@ class TerminologyService:
         self._config_root = config_root or (root / "config" / "terminology")
         self._reports_root = reports_root or self._resolve_reports_root(root)
 
-        self._settings = TerminologySettings(candidate_patterns=[r"\b[A-ZÄÖÜ][A-ZÄÖÜ0-9\-]{2,}\b"])
+        self._settings = TerminologySettings(
+            candidate_patterns=[r"\b[A-ZÄÖÜ][A-ZÄÖÜ0-9]{1,}(?:-[A-Za-zÄÖÜäöü0-9]+)*\b"]
+        )
         self._source_modes: dict[str, SourceMode] = {}
         self._terms_by_id: dict[str, TerminologyTerm] = {}
         self._candidate_exclude_patterns: list[str] = []
