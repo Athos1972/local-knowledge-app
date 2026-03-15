@@ -72,7 +72,9 @@ class TerminologySettings:
     block_min_terms: int = 2
     show_aliases_in_block: bool = False
     candidate_detection_enabled: bool = True
-    candidate_patterns: list[str] = field(default_factory=lambda: [r"\\b[A-ZÄÖÜ][A-ZÄÖÜ0-9\\-]{2,}\\b"])
+    candidate_patterns: list[str] = field(
+        default_factory=lambda: [r"\b[A-ZÄÖÜ][A-ZÄÖÜ0-9]{1,}(?:-[A-Za-zÄÖÜäöü0-9]+)*\b"]
+    )
 
 
 @dataclass(slots=True)
@@ -130,7 +132,9 @@ class TerminologyLoader:
             block_min_terms=int(raw.get("block_min_terms", 2)),
             show_aliases_in_block=bool(raw.get("show_aliases_in_block", False)),
             candidate_detection_enabled=bool(raw.get("candidate_detection_enabled", True)),
-            candidate_patterns=list(raw.get("candidate_patterns", [r"\\b[A-ZÄÖÜ][A-ZÄÖÜ0-9\\-]{2,}\\b"])),
+            candidate_patterns=list(
+                raw.get("candidate_patterns", [r"\b[A-ZÄÖÜ][A-ZÄÖÜ0-9]{1,}(?:-[A-Za-zÄÖÜäöü0-9]+)*\b"])
+            ),
         )
 
     @staticmethod
@@ -143,10 +147,19 @@ class TerminologyLoader:
         for source_name, source_data in source_entries.items():
             if not isinstance(source_data, dict):
                 continue
-            mode = str(source_data.get("mode", "off")).strip()
+            mode_raw = source_data.get("mode", "off")
+            if isinstance(mode_raw, bool):
+                mode = "off" if mode_raw is False else "annotate_and_block"
+            else:
+                mode = str(mode_raw).strip()
+            candidates_enabled_raw = source_data.get("candidates_enabled")
+            if candidates_enabled_raw is None:
+                candidates_enabled = mode != "off"
+            else:
+                candidates_enabled = bool(candidates_enabled_raw)
             parsed[source_name] = SourceMode(
                 mode=mode,
-                candidates_enabled=bool(source_data.get("candidates_enabled", False)),
+                candidates_enabled=candidates_enabled,
                 enabled=source_data.get("enabled"),
             )
         return parsed

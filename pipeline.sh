@@ -6,8 +6,6 @@ VENV_PATH="${VENV_PATH:-$PROJECT_ROOT/.venv}"
 LOG_DIR="${LOG_DIR:-$PROJECT_ROOT/logs}"
 PYTHON_BIN="${PYTHON_BIN:-}"
 
-WITH_ANYTHINGLLM=0
-SKIP_ANYTHINGLLM=0
 ONLY_STEP=""
 
 RUN_CONFLUENCE=1
@@ -32,8 +30,6 @@ usage() {
 Usage: ./pipeline.sh [options]
 
 Options:
-  --with-anythingllm     Enable AnythingLLM ingest step.
-  --skip-anythingllm     Explicitly skip AnythingLLM ingest step.
   --only <step>          Run only one step.
   --skip-confluence      Skip Confluence transform step.
   --skip-jira            Skip JIRA transform step.
@@ -53,11 +49,8 @@ Available steps for --only:
   ingestion
   index
   audit
-  ingest-anythingllm
-
 Examples:
   ./pipeline.sh
-  ./pipeline.sh --with-anythingllm
   ./pipeline.sh --only transform-confluence
   ./pipeline.sh --only audit
 EOF_HELP
@@ -65,14 +58,6 @@ EOF_HELP
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --with-anythingllm)
-      WITH_ANYTHINGLLM=1
-      shift
-      ;;
-    --skip-anythingllm)
-      SKIP_ANYTHINGLLM=1
-      shift
-      ;;
     --only)
       ONLY_STEP="${2:-}"
       if [[ -z "$ONLY_STEP" ]]; then
@@ -142,7 +127,7 @@ cd "$PROJECT_ROOT"
 step_exists() {
   local step="$1"
   case "$step" in
-    transform-confluence|transform-jira|transform-documents|transform-scraping|map-scraping|ingestion|index|audit|ingest-anythingllm)
+    transform-confluence|transform-jira|transform-documents|transform-scraping|map-scraping|ingestion|index|audit)
       return 0
       ;;
     *)
@@ -220,13 +205,6 @@ run_step_by_name() {
     audit)
       run_step "$step" "Audit" "$PYTHON_BIN" scripts/audit_report.py
       ;;
-    ingest-anythingllm)
-      if [[ -z "${ANYTHINGLLM_WORKSPACE:-}" ]]; then
-        echo "[SKIP]  Ingest AnythingLLM (ANYTHINGLLM_WORKSPACE is not set)"
-        return 0
-      fi
-      run_step "$step" "Ingest AnythingLLM" "$PYTHON_BIN" scripts/run_ingest_anythingllm.py
-      ;;
     *)
       echo "ERROR: unsupported step: $step" >&2
       exit 2
@@ -247,7 +225,6 @@ run_or_skip() {
     ingestion) label="Ingestion" ;;
     index) label="Index" ;;
     audit) label="Audit" ;;
-    ingest-anythingllm) label="Ingest AnythingLLM" ;;
   esac
   if [[ "$enabled" -eq 1 ]]; then
     run_step_by_name "$step"
@@ -268,7 +245,6 @@ if [[ -n "$ONLY_STEP" ]]; then
   echo "Only step: $ONLY_STEP"
   echo "Stdout log level: $LOG_LEVEL_STDOUT"
   echo "File log level: $LOG_LEVEL_FILE"
-  echo "AnythingLLM enabled: $([[ "$WITH_ANYTHINGLLM" -eq 1 ]] && echo yes || echo no)"
   echo "Python: $PYTHON_BIN"
   echo "Log file: $LOG_FILE"
 
@@ -276,12 +252,6 @@ if [[ -n "$ONLY_STEP" ]]; then
   echo "=== Pipeline finished ==="
   echo "Status: SUCCESS"
   exit 0
-fi
-
-if [[ "$WITH_ANYTHINGLLM" -eq 1 && "$SKIP_ANYTHINGLLM" -eq 0 ]]; then
-  RUN_ANYTHINGLLM=1
-else
-  RUN_ANYTHINGLLM=0
 fi
 
 echo "=== Local Knowledge Pipeline ==="
@@ -292,7 +262,6 @@ echo "Documents: $([[ "$RUN_DOCUMENTS" -eq 1 ]] && echo on || echo off)"
 echo "Scraping: $([[ "$RUN_SCRAPING" -eq 1 ]] && echo on || echo off)"
 echo "Index: $([[ "$RUN_INDEX" -eq 1 ]] && echo on || echo off)"
 echo "Audit: $([[ "$RUN_AUDIT" -eq 1 ]] && echo on || echo off)"
-echo "AnythingLLM: $([[ "$RUN_ANYTHINGLLM" -eq 1 ]] && echo on || echo off)"
 echo "Stdout log level: $LOG_LEVEL_STDOUT"
 echo "File log level: $LOG_LEVEL_FILE"
 echo "Python: $PYTHON_BIN"
@@ -306,7 +275,6 @@ run_or_skip "$RUN_SCRAPING" "map-scraping"
 run_step_by_name "ingestion"
 run_or_skip "$RUN_INDEX" "index"
 run_or_skip "$RUN_AUDIT" "audit"
-run_or_skip "$RUN_ANYTHINGLLM" "ingest-anythingllm"
 
 echo "=== Pipeline finished ==="
 echo "Status: SUCCESS"

@@ -43,12 +43,20 @@ class ConfluenceExportLoader:
         exports/confluence/<instance>/spaces/<space>/by-id/<pageid>/
           - metadata.json
           - content.storage.xml
+
+        Zusätzlich wird ein geshardetes Layout toleriert:
+        exports/confluence/<instance>/spaces/<space>/by-id/<shard>/<pageid>/
+          - metadata.json
+          - content.storage.xml
         """
         for metadata_path in self.input_root.rglob("metadata.json"):
             page_dir = metadata_path.parent
             if page_dir.name == "by-id":
                 continue
-            if page_dir.parent.name != "by-id":
+            if page_dir.parent.name == "by-id":
+                yield page_dir, metadata_path
+                continue
+            if page_dir.parent.parent.name != "by-id":
                 continue
             yield page_dir, metadata_path
 

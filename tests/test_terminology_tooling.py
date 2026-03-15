@@ -6,7 +6,7 @@ from pathlib import Path
 from common.config import AppConfig
 from processing.terminology.candidates import TerminologyCandidateReviewService
 from processing.terminology.excel import TerminologyExcelService
-from processing.terminology.loader import TerminologyLoader
+from processing.terminology.loader import TerminologyLoader, TerminologySettings
 from processing.terminology.validator import TerminologyValidator
 
 
@@ -251,3 +251,23 @@ terms = "t.yml"
 
     result = TerminologyValidator(cfg).validate()
     assert result.errors == []
+
+
+def test_loader_default_candidate_pattern_is_a_working_regex() -> None:
+    settings = TerminologySettings()
+    assert settings.candidate_patterns == [r"\b[A-ZÄÖÜ][A-ZÄÖÜ0-9]{1,}(?:-[A-Za-zÄÖÜäöü0-9]+)*\b"]
+
+
+def test_loader_parses_yaml_boolean_off_as_off_mode() -> None:
+    parsed = TerminologyLoader.parse_sources(
+        {
+            "sources": {
+                "scrape": {
+                    "mode": False,
+                }
+            }
+        }
+    )
+
+    assert parsed["scrape"].mode == "off"
+    assert parsed["scrape"].candidates_enabled is False

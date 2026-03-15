@@ -11,8 +11,8 @@ def test_loads_dotenv_value_without_overriding_existing_env(monkeypatch, tmp_pat
         "\n".join(
             [
                 "# comment",
-                "ANYTHINGLLM_API_KEY=from_dotenv",
-                "export ANYTHINGLLM_WORKSPACE=workspace_from_dotenv",
+                "API_KEY=from_dotenv",
+                "export WORKSPACE_NAME=workspace_from_dotenv",
                 "QUOTED_VALUE=\"quoted\"",
             ]
         ),
@@ -20,13 +20,13 @@ def test_loads_dotenv_value_without_overriding_existing_env(monkeypatch, tmp_pat
     )
 
     monkeypatch.setenv("APP_ENV_FILE", str(env_file))
-    monkeypatch.setenv("ANYTHINGLLM_WORKSPACE", "existing_workspace")
+    monkeypatch.setenv("WORKSPACE_NAME", "existing_workspace")
 
     AppConfig._env_loaded = False
     AppConfig._config = {}
 
-    assert AppConfig.get_str("ANYTHINGLLM_API_KEY", default="") == "from_dotenv"
-    assert AppConfig.get_str("ANYTHINGLLM_WORKSPACE", default="") == "existing_workspace"
+    assert AppConfig.get_str("API_KEY", default="") == "from_dotenv"
+    assert AppConfig.get_str("WORKSPACE_NAME", default="") == "existing_workspace"
     assert AppConfig.get_str("QUOTED_VALUE", default="") == "quoted"
 
 
@@ -37,7 +37,7 @@ def test_missing_dotenv_is_safe(monkeypatch, tmp_path: Path) -> None:
     AppConfig._env_loaded = False
     AppConfig._config = {}
 
-    assert AppConfig.get_str("UNSET_KEY", "anythingllm", "api_key", default="fallback") == "fallback"
+    assert AppConfig.get_str("UNSET_KEY", "missing", "api_key", default="fallback") == "fallback"
 
 
 def test_get_path_expands_tilde_from_config(monkeypatch, tmp_path: Path) -> None:
