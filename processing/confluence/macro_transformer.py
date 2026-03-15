@@ -71,7 +71,8 @@ IGNORED_MACROS = {
     "linkgraph",
     "leanix-widget",
     "listlabels",
-    "viewxls"
+    "viewxls",
+    "viewpdf"
 }
 SUPPORTED_SIMPLE = {
     "expand",
