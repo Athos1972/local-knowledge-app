@@ -147,73 +147,13 @@ Für lokale Test-/Entwicklungszyklen gibt es ein defensives Reset-Script, das Pi
 python scripts/reset_pipeline_state.py --dry-run
 python scripts/reset_pipeline_state.py --execute
 python scripts/reset_pipeline_state.py --execute --yes
-python scripts/reset_pipeline_state.py --execute --yes --keep-anythingllm
-python scripts/reset_pipeline_state.py --execute --yes --scope audit,index,staging,reports,logs,anythingllm
+python scripts/reset_pipeline_state.py --execute --yes --scope audit,index,staging,reports,logs
 ```
 
 Wichtig:
 - **Default ist Dry-Run** (`--execute` ist explizit erforderlich).
 - Ohne `--yes` fragt `--execute` interaktiv nach Bestätigung.
 - Rohdaten unter `exports/...` bleiben immer erhalten (auch ohne `--keep-exports`).
-- Lokaler Reset löscht **keinen** AnythingLLM-Workspace per API.
-
-Hinweis für echten Full Reset:
-
-> Für einen echten Full Reset bitte zusätzlich den AnythingLLM-Workspace im AnythingLLM-UI löschen, sonst können dort noch hochgeladene Dokumente/Vektoren liegen bleiben.
-
-## AnythingLLM Delta-Ingest (neu)
-
-Neuer Pipeline-Step für Upload + Workspace-Embedding aus `~/local-knowledge-data/ingest` nach AnythingLLM.
-
-### Direkt starten
-
-```bash
-python scripts/run_ingest_anythingllm.py
-python scripts/run_ingest_anythingllm.py --dry-run
-python scripts/run_ingest_anythingllm.py --force-reupload
-python scripts/run_ingest_anythingllm.py --force-reembed
-```
-
-### Pipeline-Integration
-
-```bash
-./pipeline.sh
-./pipeline.sh --with-anythingllm
-./pipeline.sh --only ingest-anythingllm
-```
-
-### Benötigte ENV-/Config-Werte
-
-- `ANYTHINGLLM_BASE_URL`
-- `ANYTHINGLLM_API_KEY`
-- `ANYTHINGLLM_WORKSPACE`
-- `ANYTHINGLLM_DOCUMENT_FOLDER`
-- `ANYTHINGLLM_UPLOAD_FILE_FIELD` (optional, Default: `file`)
-- `ANYTHINGLLM_UPLOAD_FOLDER_FIELD` (optional, Default: `folder`)
-- `INGEST_DIR` (optional)
-- `MAX_FILE_SIZE_MB` (optional)
-
-Hinweis: `.env` im Repo-Root wird automatisch geladen (alternativ Pfad via `APP_ENV_FILE`). Bereits gesetzte Prozess-ENV-Werte haben Vorrang.
-
-Defaults/strukturierte Konfiguration siehe `config/app.toml` (`[anythingllm]`, `[anythingllm.api]`, `[anythingllm_ingest]`).
-
-### Delta-Load / State / Reports
-
-- Rekursive Dateisuche unter `ingest_dir`
-- Filter über erlaubte Endungen (`.md`, `.txt`, `.json`, `.html`, `.csv`)
-- SHA256-Vergleich gegen `~/local-knowledge-data/system/anythingllm_ingest/latest_state.json`
-- Nur neue oder geänderte Dateien werden standardmäßig hochgeladen
-- Unveränderte Dateien werden mit Audit-Reason `unchanged_source` übersprungen
-- Dry-Run führt keinen API-Call aus, erzeugt aber vollständige Planung/Stats/Manifest
-- Run-Dauer wird numerisch (`run_duration`) und zusätzlich human-readable (`run_duration_human`) im Manifest ausgegeben.
-- Embed-Payload ist fix: `{"adds": ["<location-aus-upload>"]}` (kein rekonstruiertes Pathing).
-
-Run-Artefakte:
-
-- Manifest pro Lauf: `~/local-knowledge-data/system/anythingllm_ingest/run_<run_id>.json`
-- Letztes Manifest: `~/local-knowledge-data/system/anythingllm_ingest/latest_manifest.json`
-- Delta-State: `~/local-knowledge-data/system/anythingllm_ingest/latest_state.json`
-- Audit-Events: bestehende Audit-SQLite/JSONL unter `~/local-knowledge-data/system/audit/`
 
 ## Einheitliches Frontmatter-Schema
 

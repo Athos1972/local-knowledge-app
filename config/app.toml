@@ -62,61 +62,6 @@ embed_model = "nomic-embed-text"
 [embeddings]
 provider = "ollama"
 
-[anythingllm]
-# Basis-URL des AnythingLLM-Servers (ohne abschließenden Slash).
-# Wird im Client für alle API-Requests verwendet.
-# Beispielwerte: "http://localhost:3001", "https://anythingllm.internal".
-base_url = "http://localhost:3001"
-
-# Workspace-Slug (nicht Anzeigename!), der in die Embed-URL eingesetzt wird:
-# /api/v1/workspace/{workspace}/update-embeddings
-# Beispiel: "WSTW".
-workspace = ""
-
-# Zielordner/Namespace beim Upload in AnythingLLM.
-# Beeinflusst den von /document/upload zurückgegebenen internen location-Pfad.
-document_folder = "custom-documents"
-
-# HTTP-Timeout pro Request in Sekunden.
-timeout_seconds = 30
-
-# Max. Request-Retries bei transienten Fehlern (z.B. 429/5xx/Timeout).
-max_retries = 3
-
-# Linearer Retry-Backoff-Faktor in Sekunden.
-# Effektiv: backoff * attempt (1, 2, 3, ...).
-retry_backoff_seconds = 1.0
-
-# API-Key für Bearer-Auth gegen AnythingLLM.
-# Leer lassen und stattdessen via ENV setzen (ANYTHINGLLM_API_KEY).
-api_key = ""
-
-[anythingllm.api]
-# Upload-Endpoint; erwartet multipart/form-data.
-upload_path = "/api/v1/document/upload"
-
-# Embed-Endpoint-Template; {workspace} wird mit dem Workspace-Slug ersetzt.
-# Der Payload ist fest: {"adds": ["<location-aus-upload>"]}.
-workspace_attach_path_template = "/api/v1/workspace/{workspace}/update-embeddings"
-
-# Multipart-Feldname für die Datei beim Upload.
-# Mögliche Werte sind versionsabhängig, häufig "file" oder "files".
-upload_file_field = "file"
-
-# Multipart-Feldname für den Zielordner beim Upload.
-# Üblicherweise "folder".
-upload_folder_field = "folder"
-
-[anythingllm_ingest]
-# Quellverzeichnis für den Delta-Ingest (rekursiv gescannt).
-ingest_dir = "~/local-knowledge-data/ingest"
-
-# Komma-separierte erlaubte Dateiendungen für den Ingest-Scan.
-allowed_extensions = ".md,.txt,.json,.html,.csv"
-
-# Maximale Dateigröße pro Upload in MB (größere Dateien werden übersprungen).
-max_file_size_mb = 20
-
 [terminology]
 reports_dir = "reports"
 

@@ -114,7 +114,7 @@ class AuditReportService:
                     "warning_flags": "|".join(warning_flags) if warning_flags else None,
                     "is_problematic": is_problematic,
                     "source_path": latest["document_uri"],
-                    "file_path": latest["document_uri"] if source_type in {"filesystem", "anythingllm_ingest"} else None,
+                    "file_path": latest["document_uri"] if source_type == "filesystem" else None,
                     "page_id": document_id if source_type == "confluence" else None,
                     "content_id": _last_extra(extra_items, "content_id"),
                 }
@@ -269,9 +269,7 @@ class AuditReportService:
             run_id = run["run_id"]
             stages = events_by_run.get(run_id, set())
             source_type = run["source_type"]
-            if source_type == "anythingllm_ingest":
-                run_type = "ingest"
-            elif AuditStage.INDEX in stages and AuditStage.TRANSFORM not in stages:
+            if AuditStage.INDEX in stages and AuditStage.TRANSFORM not in stages:
                 run_type = "index"
             elif AuditStage.EMBED in stages and AuditStage.TRANSFORM not in stages and AuditStage.INDEX not in stages:
                 run_type = "ingest"

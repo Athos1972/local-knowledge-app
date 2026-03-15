@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from scripts import reset_pipeline_state as reset_mod
 from scripts.reset_pipeline_state import DeletionTarget, ResetOptions, ResetPaths, collect_targets, delete_targets
+
+
+@pytest.fixture(autouse=True)
+def _stub_reset_logger(monkeypatch):  # type: ignore[no-untyped-def]
+    monkeypatch.setattr(reset_mod, "get_logger", lambda *args, **kwargs: None)
 
 
 def _paths(tmp_path: Path) -> ResetPaths:
@@ -26,7 +34,6 @@ def _paths(tmp_path: Path) -> ResetPaths:
         index_root=data_root / "index",
         processed_root=data_root / "processed",
         audit_root=data_root / "system" / "audit",
-        anythingllm_root=data_root / "system" / "anythingllm_ingest",
     )
 
 
@@ -48,7 +55,6 @@ def test_dry_run_collects_candidates(tmp_path: Path) -> None:
         execute=False,
         yes=False,
         keep_exports=False,
-        keep_anythingllm=False,
         scopes=("audit", "staging"),
     )
 
@@ -62,8 +68,9 @@ def test_dry_run_collects_candidates(tmp_path: Path) -> None:
     assert (paths.ingestion_manifest_root / "latest_run_manifest.json").resolve() in target_paths
 
 
-def test_execute_deletes_only_within_allowed_roots(tmp_path: Path) -> None:
+def test_execute_deletes_only_within_allowed_roots(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     paths = _paths(tmp_path)
+    monkeypatch.setattr(reset_mod, "get_logger", lambda *args, **kwargs: None)
     safe_file = paths.logs_root / "app.log"
     safe_file.parent.mkdir(parents=True)
     safe_file.write_text("log", encoding="utf-8")
@@ -85,25 +92,6 @@ def test_execute_deletes_only_within_allowed_roots(tmp_path: Path) -> None:
     assert any("outside allowed roots" in warning for warning in warnings)
 
 
-def test_anythingllm_state_files_detected(tmp_path: Path) -> None:
-    paths = _paths(tmp_path)
-    paths.anythingllm_root.mkdir(parents=True)
-    for name in ["latest_state.json", "latest_manifest.json", "run_123.json", "keep.txt"]:
-        (paths.anythingllm_root / name).write_text("{}", encoding="utf-8")
-
-    options = ResetOptions(
-        execute=False,
-        yes=False,
-        keep_exports=False,
-        keep_anythingllm=False,
-        scopes=("anythingllm",),
-    )
-
-    targets, _ = collect_targets(paths, options)
-    names = {target.path.name for target in targets}
-    assert names == {"latest_state.json", "latest_manifest.json", "run_123.json"}
-
-
 def test_idempotent_double_execute(tmp_path: Path) -> None:
     paths = _paths(tmp_path)
     (paths.index_root).mkdir(parents=True)
@@ -114,7 +102,6 @@ def test_idempotent_double_execute(tmp_path: Path) -> None:
         execute=True,
         yes=True,
         keep_exports=False,
-        keep_anythingllm=False,
         scopes=("index",),
     )
     targets, _ = collect_targets(paths, options)
@@ -139,7 +126,6 @@ def test_execute_prunes_empty_staging_directories(tmp_path: Path) -> None:
         execute=True,
         yes=True,
         keep_exports=False,
-        keep_anythingllm=False,
         scopes=("staging",),
     )
 
@@ -162,7 +148,6 @@ def test_execute_prunes_empty_jira_staging_directories(tmp_path: Path) -> None:
         execute=True,
         yes=True,
         keep_exports=False,
-        keep_anythingllm=False,
         scopes=("staging",),
     )
 
@@ -185,7 +170,6 @@ def test_execute_prunes_empty_ingestion_manifest_directories(tmp_path: Path) -> 
         execute=True,
         yes=True,
         keep_exports=False,
-        keep_anythingllm=False,
         scopes=("staging",),
     )
 
@@ -216,7 +200,6 @@ def test_logs_scope_includes_repo_and_script_log_directories(tmp_path: Path) -> 
         execute=False,
         yes=False,
         keep_exports=False,
-        keep_anythingllm=False,
         scopes=("logs",),
     )
 

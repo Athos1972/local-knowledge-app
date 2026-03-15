@@ -16,7 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from common.config import AppConfig
 from common.logging_setup import get_logger
 
-ALL_SCOPES = ("audit", "anythingllm", "staging", "derived", "reports", "logs", "index")
+ALL_SCOPES = ("audit", "staging", "derived", "reports", "logs", "index")
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,7 +46,6 @@ class ResetPaths:
     index_root: Path
     processed_root: Path
     audit_root: Path
-    anythingllm_root: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,7 +53,6 @@ class ResetOptions:
     execute: bool
     yes: bool
     keep_exports: bool
-    keep_anythingllm: bool
     scopes: tuple[str, ...]
 
 
@@ -66,7 +64,6 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--yes", action="store_true", help="Skip interactive confirmation for --execute")
     parser.add_argument("--keep-exports", action="store_true", help="Compatibility flag (exports are always kept)")
-    parser.add_argument("--keep-anythingllm", action="store_true", help="Do not delete local AnythingLLM ingest state")
     parser.add_argument(
         "--scope",
         default=",".join(ALL_SCOPES),
@@ -136,7 +133,6 @@ def load_reset_paths(repo_root: Path) -> ResetPaths:
         index_root=(data_root / "index").resolve(),
         processed_root=(data_root / "processed").resolve(),
         audit_root=(data_root / "system" / "audit").resolve(),
-        anythingllm_root=(data_root / "system" / "anythingllm_ingest").resolve(),
     )
 
 
@@ -154,7 +150,6 @@ def parse_options(args: argparse.Namespace) -> ResetOptions:
         execute=execute,
         yes=bool(args.yes),
         keep_exports=bool(args.keep_exports),
-        keep_anythingllm=bool(args.keep_anythingllm),
         scopes=scopes,
     )
 
@@ -213,14 +208,6 @@ def collect_targets(paths: ResetPaths, options: ResetOptions) -> tuple[list[Dele
     if "audit" in selected:
         _add_targets(targets, "audit", [paths.audit_root / "pipeline_audit.sqlite"], "Audit SQLite DB")
         _add_targets(targets, "audit", _iter_files(paths.audit_root / "runs"), "Audit JSONL runs")
-
-    if "anythingllm" in selected:
-        if options.keep_anythingllm:
-            kept.append("anythingllm scope durch --keep-anythingllm bewusst behalten")
-        else:
-            names = {"latest_state.json", "latest_manifest.json"}
-            files = [p for p in _iter_files(paths.anythingllm_root) if p.name in names or p.name.startswith("run_")]
-            _add_targets(targets, "anythingllm", files, "AnythingLLM local delta/manifests")
 
     if "staging" in selected:
         _add_targets(targets, "staging", _iter_files(paths.confluence_staging_root), "Confluence staging output")
@@ -363,7 +350,6 @@ def main() -> int:
 
         allowed_roots = {
             paths.audit_root,
-            paths.anythingllm_root,
             paths.confluence_staging_root,
             paths.scraping_staging_root,
             paths.jira_staging_root,
@@ -386,11 +372,6 @@ def main() -> int:
         print("Warnungen:")
         for warning in warnings:
             print(f"  - {warning}")
-
-    print(
-        "Hinweis: Für einen echten Full Reset bitte zusätzlich den AnythingLLM-Workspace im "
-        "AnythingLLM-UI löschen, sonst können dort noch hochgeladene Dokumente/Vektoren liegen bleiben."
-    )
 
     return 0
 
