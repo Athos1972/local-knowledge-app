@@ -42,6 +42,7 @@ Options:
 
 Available steps for --only:
   transform-confluence
+  publish-confluence
   transform-jira
   transform-documents
   transform-scraping
@@ -120,7 +121,11 @@ fi
 
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/run_pipeline_$(date +%Y%m%d_%H%M%S).log"
-exec > >(tee -a "$LOG_FILE") 2>&1
+if [[ "${PIPELINE_DISABLE_TEE:-0}" == "1" ]]; then
+  exec >>"$LOG_FILE" 2>&1
+else
+  exec > >(tee -a "$LOG_FILE") 2>&1
+fi
 
 cd "$PROJECT_ROOT"
 
@@ -128,6 +133,9 @@ step_exists() {
   local step="$1"
   case "$step" in
     transform-confluence|transform-jira|transform-documents|transform-scraping|map-scraping|ingestion|index|audit)
+      return 0
+      ;;
+    publish-confluence)
       return 0
       ;;
     *)
@@ -157,6 +165,15 @@ run_step_by_name() {
     transform-confluence)
       run_step "$step" "Transform Confluence" "$PYTHON_BIN" scripts/run_transform_confluence.py
       ;;
+    publish-confluence)
+      local publish_input_root
+      publish_input_root="$($PYTHON_BIN -c "from common.config import AppConfig; from pathlib import Path; p=AppConfig.get_path(None, 'publish', 'confluence', 'input_root', default=str(Path.home() / 'local-knowledge-data' / 'staging' / 'confluence')); print(Path(p).resolve())")"
+      if [[ ! -d "$publish_input_root" ]]; then
+        echo "[SKIP]  Publish Confluence (missing input root: $publish_input_root)"
+        return 0
+      fi
+      run_step "$step" "Publish Confluence" "$PYTHON_BIN" scripts/run_publish_confluence.py
+      ;;
     transform-jira)
       if [[ ! -f "$JIRA_STEP_SCRIPT" ]]; then
         echo "[SKIP]  Transform JIRA (missing $JIRA_STEP_SCRIPT)"
@@ -165,12 +182,6 @@ run_step_by_name() {
       run_step "$step" "Transform JIRA" "$PYTHON_BIN" "$JIRA_STEP_SCRIPT"
       ;;
     transform-documents)
-      local documents_input_root
-      documents_input_root="$($PYTHON_BIN -c "from common.config import AppConfig; from pathlib import Path; p=AppConfig.get_path(None, 'documents_transform', 'input_root', default=str(Path.home() / 'local-knowledge-data' / 'exports' / 'documents')); print(Path(p).resolve())")"
-      if [[ ! -d "$documents_input_root" ]]; then
-        echo "[SKIP]  Transform Documents (missing input root: $documents_input_root)"
-        return 0
-      fi
       run_step "$step" "Transform Documents" "$PYTHON_BIN" scripts/run_transform_documents.py
       ;;
     transform-scraping)
@@ -218,6 +229,7 @@ run_or_skip() {
   local label="$step"
   case "$step" in
     transform-confluence) label="Transform Confluence" ;;
+    publish-confluence) label="Publish Confluence" ;;
     transform-jira) label="Transform JIRA" ;;
     transform-scraping) label="Transform Scraping" ;;
     transform-documents) label="Transform Documents" ;;
@@ -268,6 +280,7 @@ echo "Python: $PYTHON_BIN"
 echo "Log file: $LOG_FILE"
 
 run_or_skip "$RUN_CONFLUENCE" "transform-confluence"
+run_or_skip "$RUN_CONFLUENCE" "publish-confluence"
 run_or_skip "$RUN_JIRA" "transform-jira"
 run_or_skip "$RUN_DOCUMENTS" "transform-documents"
 run_or_skip "$RUN_SCRAPING" "transform-scraping"

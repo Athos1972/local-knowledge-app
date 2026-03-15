@@ -38,6 +38,40 @@ class ConfluenceWriterTests(unittest.TestCase):
             self.assertTrue(extra_path.exists())
             self.assertIn("doc_type", extra_path.read_text(encoding="utf-8"))
 
+    def test_build_output_path_truncates_long_slug(self) -> None:
+        writer = ConfluenceTransformWriter(Path("/tmp/out"))
+
+        path = writer.build_output_path("DOC", "157624513", "a" * 400)
+
+        self.assertEqual("157624513__" + ("a" * 120) + ".md", path.name)
+        self.assertLess(len(path.name), 255)
+
+    def test_write_transformed_page_removes_previous_artifacts_for_same_page(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            writer = ConfluenceTransformWriter(Path(tmp))
+            space_dir = Path(tmp) / "doc"
+            space_dir.mkdir(parents=True, exist_ok=True)
+            stale_main = space_dir / "42__alte-seite.md"
+            stale_extra = space_dir / "42__alte-seite__table_01.md"
+            stale_main.write_text("old", encoding="utf-8")
+            stale_extra.write_text("old-extra", encoding="utf-8")
+
+            main_path = writer.build_output_path("DOC", "42", "Neue Seite")
+            page = ConfluenceTransformedPage(
+                page_id="42",
+                space_key="DOC",
+                title="Neue Seite",
+                body_markdown="# Neue Seite",
+                source_ref="dummy",
+                extra_documents=[],
+            )
+
+            writer.write_transformed_page(main_path, "---\ntitle: \"x\"\n---\n\n# Neue Seite", page)
+
+            self.assertTrue(main_path.exists())
+            self.assertFalse(stale_main.exists())
+            self.assertFalse(stale_extra.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

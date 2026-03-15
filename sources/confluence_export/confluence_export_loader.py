@@ -79,7 +79,10 @@ class ConfluenceExportLoader:
         if not parent_title and ancestors:
             parent_title = ancestors[-1]
 
-        attachments = self._normalize_attachments(self._pick(payload, ["attachments"], default=[]))
+        attachments, attachment_paths = self._normalize_attachments(
+            self._pick(payload, ["attachments"], default=[]),
+            page_dir=page_dir,
+        )
 
         return ConfluenceRawPage(
             page_id=page_id or source_file.parent.name,
@@ -96,6 +99,7 @@ class ConfluenceExportLoader:
             ancestors=ancestors,
             page_properties=self._normalize_dict(self._pick(payload, ["page_properties", "properties"], default={})),
             attachments=attachments,
+            attachment_paths=attachment_paths,
             raw_metadata=payload,
         )
 
@@ -166,16 +170,48 @@ class ConfluenceExportLoader:
         return result
 
     @staticmethod
-    def _normalize_attachments(value: Any) -> list[dict[str, Any]]:
+    def _normalize_attachments(value: Any, *, page_dir: Path) -> tuple[list[dict[str, Any]], list[str]]:
         if not isinstance(value, list):
-            return []
+            return [], []
         normalized: list[dict[str, Any]] = []
+        attachment_paths: list[str] = []
+        attachments_dir = page_dir / "attachments"
         for item in value:
+            entry: dict[str, Any]
             if isinstance(item, dict):
-                normalized.append(item)
+                entry = dict(item)
             elif isinstance(item, str):
-                normalized.append({"name": item})
-        return normalized
+                entry = {"name": item}
+            else:
+                continue
+
+            local_path = entry.get("local_path")
+            if isinstance(local_path, str) and local_path.strip():
+                resolved = Path(local_path.strip()).expanduser().resolve()
+                entry["local_path"] = str(resolved)
+                attachment_paths.append(str(resolved))
+                normalized.append(entry)
+                continue
+
+            candidate_names = [
+                entry.get("name"),
+                entry.get("title"),
+                entry.get("filename"),
+                entry.get("fileName"),
+            ]
+            resolved_path = None
+            for candidate in candidate_names:
+                if not isinstance(candidate, str) or not candidate.strip():
+                    continue
+                path = attachments_dir / Path(candidate.strip()).name
+                if path.exists() and path.is_file():
+                    resolved_path = path.resolve()
+                    entry["local_path"] = str(resolved_path)
+                    attachment_paths.append(str(resolved_path))
+                    break
+
+            normalized.append(entry)
+        return normalized, attachment_paths
 
     @staticmethod
     def _normalize_dict(value: Any) -> dict[str, Any]:

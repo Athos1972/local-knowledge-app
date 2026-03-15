@@ -19,6 +19,9 @@ class _StubSearcher:
     def search(self, query: str, top_k: int = 5) -> list[SearchResult]:
         return self._results[:top_k]
 
+    def search_candidates(self, query: str, candidate_k: int = 100, source_filters: list[str] | None = None) -> list[SearchResult]:
+        return self._results[:candidate_k]
+
 
 class _StubProvider(BaseLlmProvider):
     provider_name = "stub"

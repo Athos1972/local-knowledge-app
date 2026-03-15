@@ -22,6 +22,7 @@ class SearchResult:
     metadata: dict[str, Any]
     source_ref: str | None = None
     section_header: str | None = None
+    rerank_score: float | None = None
 
 
 class KeywordSearcher:

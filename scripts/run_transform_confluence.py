@@ -28,6 +28,12 @@ from processing.frontmatter_schema import parse_frontmatter
 from sources.confluence_export.confluence_export_loader import ConfluenceExportLoader
 from sources.document import stable_hash, utc_now_iso
 
+_EXPECTED_DEBUG_WARNING_CODES = {
+    # Some Confluence exports list more attachments in metadata than are
+    # physically downloaded into the page's attachments directory.
+    "attachment_missing_local_path",
+}
+
 
 def parse_args() -> argparse.Namespace:
     """Liest CLI-Parameter für den Transform-Lauf."""
@@ -315,11 +321,20 @@ def main() -> int:
             )
             if transformed.transform_warnings:
                 warning_codes = [w.code for w in transformed.transform_warnings]
-                logger.warning(
-                    "Seite verarbeitet mit Warnungen: page_id=%s warnings=%s",
-                    page.page_id,
-                    warning_codes,
-                )
+                elevated_warning_codes = [code for code in warning_codes if code not in _EXPECTED_DEBUG_WARNING_CODES]
+                expected_debug_codes = [code for code in warning_codes if code in _EXPECTED_DEBUG_WARNING_CODES]
+                if elevated_warning_codes:
+                    logger.warning(
+                        "Seite verarbeitet mit Warnungen: page_id=%s warnings=%s",
+                        page.page_id,
+                        elevated_warning_codes,
+                    )
+                if expected_debug_codes:
+                    logger.debug(
+                        "Seite verarbeitet mit erwartbaren Export-Luecken: page_id=%s warnings=%s",
+                        page.page_id,
+                        expected_debug_codes,
+                    )
                 if "unsupported_macro" in warning_codes and transformed.unsupported_macros:
                     logger.warning(
                         "Seite mit unsupported_macro: page_id=%s macros=%s",

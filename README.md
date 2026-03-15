@@ -4,6 +4,29 @@
 Die App lädt Markdown-Dateien aus einem separaten Daten-Repo, normalisiert Inhalte,
 chunkt Texte und bietet lokale Suche, Ask-/Prompt-Aufbereitung sowie eine **optionale** LLM-Ausführung.
 
+## MVP-Architektur mit lokalem Vorfilter
+
+Der aktuelle MVP-Stack läuft vollständig lokal:
+
+- Embeddings über Ollama
+- Antwortmodell über Ollama
+- hybrides Retrieval aus Keyword + Vector
+- lokaler Vorfilter per Cross-Encoder-Reranker
+- Streamlit-UI auf der bestehenden `main`-Pipeline
+
+Die Retrieval-Kette ist:
+
+```text
+Frage
+-> Hybrid Retrieval (Candidate-K, z. B. 100)
+-> lokaler Reranker / Vorfilter
+-> finale Treffer (Final-K, z. B. 7)
+-> Kontext + Prompt
+-> Ollama-Antwort
+```
+
+Der lokale Vorfilter ist standardmäßig auf `BAAI/bge-reranker-v2-m3` ausgelegt und benötigt keine externe API.
+
 ## Offline-first Zielbild (neu)
 
 Die Runtime ist jetzt standardmäßig vollständig lokal über **Ollama**:
@@ -28,6 +51,8 @@ Konfiguration wird aus `config/app.toml` gelesen, ENV-Variablen überschreiben T
 - `OLLAMA_CHAT_MODEL` (Default: `llama3.1:8b`)
 - `OLLAMA_EMBED_MODEL` (Default: `nomic-embed-text`)
 - `EMBEDDING_PROVIDER` (`ollama` oder `sentence_transformers`, Default: `ollama`)
+- `RERANKER_MODEL` (Default: `BAAI/bge-reranker-v2-m3`)
+- `RERANKER_DEVICE` (optional, z. B. `mps`, `cpu`, `cuda`)
 
 ### app.toml Defaults
 
@@ -39,12 +64,29 @@ embed_model = "nomic-embed-text"
 
 [embeddings]
 provider = "ollama"
+
+[retrieval]
+candidate_k = 100
+final_k = 7
+keyword_weight = 0.5
+vector_weight = 0.5
+max_context_chars = 8000
+
+[reranker]
+enabled = true
+model = "BAAI/bge-reranker-v2-m3"
+device = "mps"
 ```
 
 ## Lokales Setup mit Ollama
 
-1. Ollama installieren (siehe offizielle Ollama-Dokumentation).
-2. Server starten:
+1. Virtuelle Umgebung verwenden:
+
+```bash
+source .venv/bin/activate
+```
+
+2. Ollama installieren und Server starten:
 
 ```bash
 ollama serve
@@ -55,13 +97,39 @@ ollama serve
 ```bash
 ollama pull llama3.1:8b
 ollama pull nomic-embed-text
-# optional
-ollama pull bge-m3
 ```
+
+4. Python-Abhängigkeiten sicherstellen:
+
+```bash
+pip install -r Requirements.txt
+```
+
+Hinweis:
+- Für den lokalen Vorfilter werden `sentence-transformers`, `transformers` und `torch` benötigt.
+- Auf Apple Silicon ist `mps` als Reranker-Device der sinnvolle Startwert.
 
 ## Pipeline (kurz)
 
-Confluence-Transform (optional) → Publish → Ingestion → Chunking → Vector-Index → Retrieval (Keyword/Vector/Hybrid) → Prompt → optionale LLM-Antwort.
+Confluence-Transform (optional) → Publish → Ingestion → Chunking → Vector-Index → Retrieval (Keyword/Vector/Hybrid) → lokaler Vorfilter / Reranker → Prompt → optionale LLM-Antwort.
+
+## UI starten
+
+Die Streamlit-App nutzt direkt die Retrieval-Pipeline aus `main`.
+
+```bash
+source .venv/bin/activate
+streamlit run app.py
+```
+
+Die UI bietet:
+
+- Candidate-K vor dem Vorfilter
+- Final-K nach dem Vorfilter
+- Keyword-/Vector-Gewichtung
+- Quellenfilter
+- Modellwahl für Ollama
+- Debug-Ansicht für Kandidaten und finale Treffer
 
 ## Terminologie-Kandidatenreport
 
@@ -74,25 +142,34 @@ Confluence-Transform (optional) → Publish → Ingestion → Chunking → Vecto
 ## Wichtige Befehle
 
 ```bash
-python ./scripts/run_ingestion.py
-python ./scripts/build_vector_index.py
-python ./scripts/answer.py "event mesh kyma"
+python3 ./scripts/run_ingestion.py
+python3 ./scripts/build_vector_index.py
+python3 ./scripts/answer.py "event mesh kyma"
 ```
 
 Mit expliziter Embedding-Konfiguration:
 
 ```bash
-python ./scripts/build_vector_index.py \
+python3 ./scripts/build_vector_index.py \
   --embedding-provider ollama \
   --embedding-model nomic-embed-text \
   --ollama-url http://localhost:11434
 
-python ./scripts/answer.py "event mesh kyma" \
+python3 ./scripts/answer.py "event mesh kyma" \
   --model llama3.1:8b \
   --base-url http://localhost:11434 \
   --embedding-provider ollama \
   --embedding-model nomic-embed-text \
   --ollama-url http://localhost:11434
+```
+
+Mit lokalem Vorfilter und Debug-Ausgabe:
+
+```bash
+python3 ./scripts/answer.py "event mesh kyma" \
+  --candidate-k 100 \
+  --top-k 7 \
+  --reranker-model BAAI/bge-reranker-v2-m3
 ```
 
 ## Häufige Fehler
@@ -118,7 +195,20 @@ ollama pull llama3.1:8b
 ollama pull nomic-embed-text
 ```
 
-### 3) Index wurde mit anderem Embedding-Modell gebaut
+### 3) Lokaler Reranker nicht verfügbar
+
+Typische Meldung:
+
+> Für den lokalen Reranker fehlt das Paket `sentence-transformers`
+
+Lösung:
+
+```bash
+source .venv/bin/activate
+pip install -r Requirements.txt
+```
+
+### 4) Index wurde mit anderem Embedding-Modell gebaut
 
 Typische Meldung:
 

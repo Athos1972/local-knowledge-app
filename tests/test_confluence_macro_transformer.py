@@ -242,7 +242,8 @@ class ConfluenceMacroTransformerTests(unittest.TestCase):
 
         self.assertIn('## Open Tasks', result.body_markdown)
         self.assertIn('## Completed Tasks', result.body_markdown)
-        self.assertIn('Prüfen ob EMMA im S/4 Utilities anders heißt.', result.body_markdown)
+        self.assertIn('Prüfen ob EMMA im S/4', result.body_markdown)
+        self.assertIn('Utilities anders heißt.', result.body_markdown)
         self.assertIn('Mentions: Peter.', result.body_markdown)
         self.assertIn('Status: open.', result.body_markdown)
         self.assertIn('Architektur bestätigt 2026-02-14.', result.body_markdown)

@@ -97,6 +97,7 @@ class ConfluenceTableTransformerTests(unittest.TestCase):
         self.assertEqual("123456__marktkommunikation__table_01.md", extra.file_name)
         self.assertIn("[Komplexe Tabelle ausgelagert: 123456__marktkommunikation__table_01.md]", result.body_markdown)
         self.assertEqual("confluence_table", extra.doc_type)
+        self.assertEqual("DOC", extra.metadata["space_key"])
         self.assertTrue(extra.metadata.get("table_complexity"))
         self.assertEqual(1, extra.metadata.get("table_index"))
         self.assertFalse(any(w.code == "complex_table" for w in result.transform_warnings))

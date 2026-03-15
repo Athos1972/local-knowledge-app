@@ -2,51 +2,52 @@
 
 from __future__ import annotations
 
-import json
-
 from processing.confluence.models import ConfluenceTransformedPage
+from processing.documents.reference_resolver import resolve_attachment_document_ids
+from processing.frontmatter_schema import build_frontmatter, render_frontmatter
 
 
 class MarkdownRenderer:
     """Rendert transformierte Seiten in ingestierbares Markdown."""
 
     def render(self, page: ConfluenceTransformedPage) -> str:
-        frontmatter = self._render_frontmatter(page)
-        body = page.body_markdown.strip()
-        return f"---\n{frontmatter}\n---\n\n{body}\n"
-
-    def _render_frontmatter(self, page: ConfluenceTransformedPage) -> str:
-        payload = {
-            "title": page.title,
-            "source_type": "confluence",
-            "space_key": page.space_key,
-            "page_id": page.page_id,
-            "source_url": page.source_url or "",
-            "created_at": page.created_at or "",
-            "updated_at": page.updated_at or "",
-            "author": page.author or "",
-            "labels": page.labels,
-            "doc_type": "confluence_page",
-            "tags": page.labels,
-            "transform_warnings": page.warning_messages(),
-            "unsupported_macros": page.unsupported_macros,
-            "parent_title": page.parent_title or "",
-            "ancestors": page.ancestors,
+        image_refs = [ref for ref in page.image_analysis_refs if isinstance(ref, dict)]
+        attachment_document_ids = resolve_attachment_document_ids(
+            [
+                str(item.get("local_path"))
+                for item in page.attachments
+                if isinstance(item, dict) and item.get("local_path")
+            ]
+        )
+        frontmatter = build_frontmatter(
+            title=page.title,
+            source_type="confluence",
+            source_system="confluence_export",
+            source_key=page.space_key.lower(),
+            source_url=page.source_url or "",
+            original_id=page.page_id,
+            original_path=page.source_ref,
+            created_at=page.created_at,
+            updated_at=page.updated_at,
+            tags=page.labels,
+            authors=[page.author] if page.author else [],
+            content_hash=page.content_hash,
+            attachments=[a.get("name") for a in page.attachments if isinstance(a, dict) and a.get("name")],
+            image_analysis_status="complete" if image_refs else "not_applicable",
+            image_attachment_count=len(image_refs),
+            image_analysis=image_refs,
+            parent_title=page.parent_title or "",
+            ancestors=page.ancestors,
+            page_properties=page.page_properties,
+            unsupported_macros=page.unsupported_macros,
+            doc_type="confluence_page",
             **page.promoted_properties,
-            "page_properties": page.page_properties,
-            "content_hash": page.content_hash,
-        }
-
-        lines: list[str] = []
-        for key, value in payload.items():
-            lines.append(f"{key}: {self._yaml_value(value)}")
-        return "\n".join(lines)
-
-    def _yaml_value(self, value: object) -> str:
-        if isinstance(value, str):
-            return json.dumps(value, ensure_ascii=False)
-        if isinstance(value, list):
-            return json.dumps(value, ensure_ascii=False)
-        if isinstance(value, dict):
-            return json.dumps(value, ensure_ascii=False)
-        return json.dumps(value, ensure_ascii=False)
+            source_meta={
+                "space_key": page.space_key,
+                "page_id": page.page_id,
+                "attachment_document_ids": attachment_document_ids,
+                "transform_warnings": page.warning_messages(),
+                "image_analysis_refs": image_refs,
+            },
+        )
+        return render_frontmatter(frontmatter, page.body_markdown)

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
+from processing.jira.models import JiraTransformedIssue
+
 
 class JiraTransformWriter:
     def __init__(self, output_root: Path):
@@ -19,9 +21,29 @@ class JiraTransformWriter:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
 
+    def write_transformed_issue(self, issue_path: Path, markdown: str, issue: JiraTransformedIssue) -> list[Path]:
+        self._remove_previous_artifacts(issue_path, issue.issue_key)
+        self.write_markdown(issue_path, markdown)
+        written_paths: list[Path] = [issue_path]
+        for artifact in issue.derived_artifacts:
+            artifact_path = issue_path.parent / artifact.file_name
+            if artifact.media_type.startswith("text/") or artifact.media_type == "application/json":
+                artifact_path.write_text(artifact.content, encoding="utf-8")
+            else:
+                artifact_path.write_bytes(artifact.content.encode("utf-8"))
+            written_paths.append(artifact_path)
+        return written_paths
+
     @staticmethod
     def _slugify(value: str) -> str:
         lower = value.strip().lower()
         normalized = re.sub(r"[^a-z0-9äöüß\-\s]", "", lower)
         compact = re.sub(r"\s+", "-", normalized)
         return compact.strip("-") or "untitled"
+
+    @staticmethod
+    def _remove_previous_artifacts(issue_path: Path, issue_key: str) -> None:
+        for pattern in (f"{issue_key}__*.md", f"{issue_key}__*.json"):
+            for candidate in issue_path.parent.glob(pattern):
+                if candidate != issue_path and candidate.is_file():
+                    candidate.unlink()

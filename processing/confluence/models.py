@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from processing.image_analysis.models import DerivedFileArtifact
+
 
 @dataclass(slots=True)
 class TransformWarning:
@@ -42,6 +44,7 @@ class ConfluenceRawPage:
     page_properties: dict[str, Any] = field(default_factory=dict)
     promoted_properties: dict[str, Any] = field(default_factory=dict)
     attachments: list[dict[str, Any]] = field(default_factory=list)
+    attachment_paths: list[str] = field(default_factory=list)
     raw_metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -65,8 +68,11 @@ class ConfluenceTransformedPage:
     promoted_properties: dict[str, Any] = field(default_factory=dict)
     attachments: list[dict[str, Any]] = field(default_factory=list)
     transform_warnings: list[TransformWarning] = field(default_factory=list)
+    attachment_stats: dict[str, Any] = field(default_factory=dict)
     unsupported_macros: list[str] = field(default_factory=list)
     extra_documents: list[ConfluenceExtraDocument] = field(default_factory=list)
+    image_analysis_refs: list[dict[str, Any]] = field(default_factory=list)
+    derived_artifacts: list[DerivedFileArtifact] = field(default_factory=list)
     content_hash: str = ""
 
     def warning_messages(self) -> list[str]:

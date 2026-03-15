@@ -38,6 +38,7 @@ class JiraTransformRunManifest:
     issues_processed: int = 0
     issues_skipped: int = 0
     issues_failed: int = 0
+    issues_changed: int = 0
     records: list[JiraTransformRecord] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:

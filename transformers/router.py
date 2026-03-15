@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .image_attachment_transformer import ImageAttachmentTransformer
 from .markitdown_transformer import MarkItDownTransformer
 
 
@@ -10,7 +11,7 @@ from .markitdown_transformer import MarkItDownTransformer
 class TransformRouter:
     """Routes file paths to matching transformer adapters."""
 
-    transformers: list[object] = field(default_factory=lambda: [MarkItDownTransformer()])
+    transformers: list[object] = field(default_factory=lambda: [ImageAttachmentTransformer(), MarkItDownTransformer()])
 
     def resolve(self, path: Path) -> object | None:
         for transformer in self.transformers:

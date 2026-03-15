@@ -15,6 +15,8 @@ from llm.ollama_provider import OllamaProvider, OllamaProviderError
 from retrieval.answer_executor import AnswerExecutor
 from retrieval.embedding_provider import EmbeddingProviderError
 from retrieval.embedding_provider import build_embedding_provider
+from retrieval.reranker import RerankerError
+from retrieval.reranker import SentenceTransformerReranker
 from retrieval.runtime_settings import RuntimeSettings
 
 
@@ -23,16 +25,42 @@ def parse_args() -> argparse.Namespace:
 
     parser = argparse.ArgumentParser(description="Answer question via retrieval + optional LLM provider")
     parser.add_argument("query", help="Suchanfrage, z. B. 'event mesh kyma'")
-    parser.add_argument("--top-k", type=int, default=5, help="Anzahl Treffer (Standard: 5)")
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=settings.retrieval_final_k,
+        help="Anzahl finaler Treffer nach Reranking",
+    )
+    parser.add_argument(
+        "--candidate-k",
+        type=int,
+        default=settings.retrieval_candidate_k,
+        help="Anzahl Kandidaten vor dem Reranking",
+    )
     parser.add_argument(
         "--root",
         type=Path,
         default=Path.home() / "local-knowledge-data",
         help="Daten-Root mit processed/chunks, processed/metadata und index/",
     )
-    parser.add_argument("--keyword-weight", type=float, default=0.5, help="Gewichtung Keyword in hybrid")
-    parser.add_argument("--vector-weight", type=float, default=0.5, help="Gewichtung Vector in hybrid")
-    parser.add_argument("--max-context-chars", type=int, default=8000, help="Maximale Kontextgröße")
+    parser.add_argument(
+        "--keyword-weight",
+        type=float,
+        default=settings.retrieval_keyword_weight,
+        help="Gewichtung Keyword in hybrid",
+    )
+    parser.add_argument(
+        "--vector-weight",
+        type=float,
+        default=settings.retrieval_vector_weight,
+        help="Gewichtung Vector in hybrid",
+    )
+    parser.add_argument(
+        "--max-context-chars",
+        type=int,
+        default=settings.retrieval_max_context_chars,
+        help="Maximale Kontextgröße",
+    )
     parser.add_argument("--provider", default="ollama", choices=["ollama"], help="Aktueller LLM-Provider")
     parser.add_argument("--model", default=settings.ollama_chat_model, help="LLM-Modellname")
     parser.add_argument("--base-url", default=settings.ollama_base_url, help="Provider Base URL")
@@ -51,6 +79,27 @@ def parse_args() -> argparse.Namespace:
         "--ollama-url",
         default=settings.ollama_base_url,
         help="Ollama Base URL für Chat + Embeddings",
+    )
+    parser.add_argument(
+        "--disable-reranker",
+        action="store_true",
+        help="Lokalen Reranker deaktivieren und direkt Hybrid-Treffer verwenden",
+    )
+    parser.add_argument(
+        "--reranker-model",
+        default=settings.reranker_model,
+        help="Lokales Reranker-Modell",
+    )
+    parser.add_argument(
+        "--reranker-device",
+        default=settings.reranker_device,
+        help="Optionales Device für den Reranker (z. B. mps, cpu, cuda)",
+    )
+    parser.add_argument(
+        "--source-filter",
+        action="append",
+        default=[],
+        help="Optionaler Quellenfilter; mehrfach verwendbar, z. B. --source-filter confluence",
     )
     return parser.parse_args()
 
@@ -76,6 +125,13 @@ def main() -> int:
         print(f"Fehler beim Embedding-Setup: {error}")
         return 2
 
+    reranker = None
+    if not args.disable_reranker:
+        reranker = SentenceTransformerReranker(
+            model_name=args.reranker_model,
+            device=args.reranker_device,
+        )
+
     provider = _build_provider(args)
     executor = AnswerExecutor.from_data_root(
         llm_provider=provider,
@@ -84,11 +140,22 @@ def main() -> int:
         vector_weight=args.vector_weight,
         max_context_chars=args.max_context_chars,
         embedding_provider=embedding_provider,
+        reranker=reranker,
+        candidate_k=args.candidate_k,
+        final_k=args.top_k,
+        reranker_enabled=not args.disable_reranker,
+        reranker_model=args.reranker_model,
+        reranker_device=args.reranker_device,
     )
 
     try:
-        payload = executor.answer(args.query, top_k=max(1, args.top_k))
-    except (OllamaProviderError, EmbeddingProviderError, ValueError) as error:
+        payload = executor.answer(
+            args.query,
+            top_k=max(1, args.top_k),
+            candidate_k=max(1, args.candidate_k),
+            source_filters=args.source_filter,
+        )
+    except (OllamaProviderError, EmbeddingProviderError, RerankerError, ValueError) as error:
         logger.error("Provider error: %s", error)
         print(f"Fehler beim Aufruf ({provider.provider_name}/{provider.model_name}): {error}")
         return 2
@@ -98,6 +165,7 @@ def main() -> int:
         return 1
 
     results = payload["results"]
+    candidate_results = payload.get("candidate_results", [])
     sources = payload["sources"]
     prompt = payload["prompt"]
     answer_text = payload["answer_text"]
@@ -126,6 +194,22 @@ def main() -> int:
     print(answer_text)
     print()
 
+    debug = payload.get("debug", {})
+    if debug:
+        print("=" * 80)
+        print("Retrieval Debug")
+        print("=" * 80)
+        print(
+            f"candidate_k={debug.get('candidate_k')} | retrieved_candidates={debug.get('retrieved_candidates')} "
+            f"| final_k={debug.get('final_k')} | final_results={debug.get('final_results')}"
+        )
+        print(
+            f"reranker_enabled={debug.get('reranker_enabled')} | reranker_model={debug.get('reranker_model')}"
+        )
+        if debug.get("source_filters"):
+            print(f"source_filters={', '.join(debug['source_filters'])}")
+        print()
+
     print("=" * 80)
     print(f"Quellen ({len(sources)})")
     print("=" * 80)
@@ -142,6 +226,19 @@ def main() -> int:
                 print(f"    section={section}")
             if source.get("source_ref"):
                 print(f"    source_ref={source['source_ref']}")
+
+    if candidate_results:
+        print()
+        print("=" * 80)
+        print(f"Kandidaten vor Reranking ({len(candidate_results)})")
+        print("=" * 80)
+        for candidate in candidate_results[: min(10, len(candidate_results))]:
+            rerank_suffix = ""
+            if candidate.rerank_score is not None:
+                rerank_suffix = f" | rerank_score={candidate.rerank_score:.4f}"
+            print(
+                f"{candidate.chunk_id} | doc_id={candidate.doc_id} | score={candidate.score:.4f}{rerank_suffix}"
+            )
 
     llm_response = payload.get("llm_response")
     if llm_response:

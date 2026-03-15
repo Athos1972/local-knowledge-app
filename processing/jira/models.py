@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from processing.confluence.models import TransformWarning
+from processing.image_analysis.models import DerivedFileArtifact
 
 
 @dataclass(slots=True)
@@ -53,6 +54,9 @@ class JiraTransformedIssue:
     fix_versions: list[str] = field(default_factory=list)
     attachments: list[dict[str, Any]] = field(default_factory=list)
     transform_warnings: list[TransformWarning] = field(default_factory=list)
+    attachment_stats: dict[str, Any] = field(default_factory=dict)
+    image_analysis_refs: list[dict[str, Any]] = field(default_factory=list)
+    derived_artifacts: list[DerivedFileArtifact] = field(default_factory=list)
     content_hash: str = ""
 
     def warning_messages(self) -> list[str]:

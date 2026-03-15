@@ -48,7 +48,7 @@ def _configure_once(run_id: str | None = None) -> None:
     stdout_level = getattr(logging, stdout_level_name, fallback_level)
     file_level = getattr(logging, file_level_name, fallback_level)
 
-    log_dir = AppConfig.get_path(None, "logging", "log_dir", default="logs")
+    log_dir = AppConfig.get_path("LOG_DIR", "logging", "log_dir", default="logs")
     log_to_console = bool(AppConfig.get("logging", "log_to_console", default=True))
     log_to_file = bool(AppConfig.get("logging", "log_to_file", default=True))
     separate_file_per_run = bool(

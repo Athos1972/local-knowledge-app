@@ -1,1 +1,5 @@
 pyyaml
+streamlit
+sentence-transformers
+transformers
+torch

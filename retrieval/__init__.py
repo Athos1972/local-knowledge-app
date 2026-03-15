@@ -7,6 +7,7 @@ from retrieval.context_builder import ContextBuilder
 from retrieval.hybrid_search import HybridSearcher
 from retrieval.keyword_search import KeywordSearcher, SearchResult
 from retrieval.prompt_builder import PromptBuilder
+from retrieval.reranker import BaseReranker, RerankerError, SentenceTransformerReranker
 from retrieval.source_formatter import SourceFormatter
 from retrieval.vector_index import VectorIndex
 from retrieval.vector_search import VectorSearcher
@@ -20,6 +21,9 @@ __all__ = [
     "KeywordSearcher",
     "SearchResult",
     "PromptBuilder",
+    "BaseReranker",
+    "SentenceTransformerReranker",
+    "RerankerError",
     "SourceFormatter",
     "VectorIndex",
     "VectorSearcher",

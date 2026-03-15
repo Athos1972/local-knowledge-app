@@ -17,8 +17,21 @@ class JiraTransformStateRecord:
 
 
 @dataclass(slots=True)
+class JiraTransformStateSummary:
+    last_run_id: str = ""
+    last_mode: str = "incremental"
+    last_saved_at: str = ""
+    issues_seen: int = 0
+    issues_processed: int = 0
+    issues_skipped: int = 0
+    issues_failed: int = 0
+    issues_changed: int = 0
+
+
+@dataclass(slots=True)
 class JiraTransformState:
     issues: dict[str, JiraTransformStateRecord] = field(default_factory=dict)
+    summary: JiraTransformStateSummary = field(default_factory=JiraTransformStateSummary)
 
     @classmethod
     def load(cls, path: Path) -> JiraTransformState:
@@ -36,7 +49,18 @@ class JiraTransformState:
                 output_file=str(record.get("output_file", "")),
                 updated_at=str(record.get("updated_at", "")),
             )
-        return cls(issues=issues)
+        raw_summary: dict[str, Any] = payload.get("summary", {})
+        summary = JiraTransformStateSummary(
+            last_run_id=str(raw_summary.get("last_run_id", "")),
+            last_mode=str(raw_summary.get("last_mode", "incremental")),
+            last_saved_at=str(raw_summary.get("last_saved_at", "")),
+            issues_seen=int(raw_summary.get("issues_seen", 0) or 0),
+            issues_processed=int(raw_summary.get("issues_processed", 0) or 0),
+            issues_skipped=int(raw_summary.get("issues_skipped", 0) or 0),
+            issues_failed=int(raw_summary.get("issues_failed", 0) or 0),
+            issues_changed=int(raw_summary.get("issues_changed", 0) or 0),
+        )
+        return cls(issues=issues, summary=summary)
 
     def save(self, path: Path) -> None:
         target = path.expanduser().resolve()
@@ -44,4 +68,7 @@ class JiraTransformState:
         target.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
 
     def to_dict(self) -> dict[str, Any]:
-        return {"issues": {issue_key: asdict(record) for issue_key, record in self.issues.items()}}
+        return {
+            "summary": asdict(self.summary),
+            "issues": {issue_key: asdict(record) for issue_key, record in self.issues.items()},
+        }

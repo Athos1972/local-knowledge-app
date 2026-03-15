@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import html
+import logging
 from pathlib import Path
+from time import perf_counter
 import re
 
 from processing.confluence.link_transformer import LinkTransformer
 from processing.confluence.models import TransformWarning
+from processing.image_analysis.models import DerivedFileArtifact, ParentDocumentContext
 from processing.jira.models import JiraRawIssue, JiraTransformedIssue
 from sources.document import stable_hash
 from processing.terminology import TerminologyService
 from transformers.router import TransformRouter
+
+logger = logging.getLogger(__name__)
 
 
 class JiraTransformer:
@@ -49,9 +54,17 @@ class JiraTransformer:
             lines.extend(["", "## Beschreibung", ""])
         lines.append(text or "_Keine Beschreibung im Export gefunden._")
 
-        attachment_sections = self._render_attachment_content(issue, warnings)
+        attachment_sections, image_analysis_refs, derived_artifacts = self._render_attachment_content(issue, warnings)
+        attachment_stats = self._build_attachment_stats(issue, warnings)
         if attachment_sections:
             lines.extend(["", "## Anhang-Inhalte (extrahiert)", "", *attachment_sections])
+        if image_analysis_refs:
+            lines.extend(["", "## Abgeleitete Bildanalysen", ""])
+            lines.extend(
+                f"- [{item.get('attachment_name', 'Bildanalyse')}]({item.get('derived_md_file', '')})"
+                for item in image_analysis_refs
+                if item.get("derived_md_file")
+            )
 
         body = "\n".join(lines).rstrip() + self._link_transformer.render_attachments(issue.attachments)
         terminology_result = self._terminology_service.apply_to_text(
@@ -94,18 +107,29 @@ class JiraTransformer:
             fix_versions=issue.fix_versions,
             attachments=issue.attachments,
             transform_warnings=warnings,
+            attachment_stats=attachment_stats,
+            image_analysis_refs=image_analysis_refs,
+            derived_artifacts=derived_artifacts,
             content_hash=content_hash,
         )
 
-    def _render_attachment_content(self, issue: JiraRawIssue, warnings: list[TransformWarning]) -> list[str]:
+    def _render_attachment_content(
+        self,
+        issue: JiraRawIssue,
+        warnings: list[TransformWarning],
+    ) -> tuple[list[str], list[dict[str, object]], list[DerivedFileArtifact]]:
         sections: list[str] = []
+        image_analysis_refs: list[dict[str, object]] = []
+        derived_artifacts: list[DerivedFileArtifact] = []
         indexed = {Path(path).name: path for path in issue.attachment_paths}
+        attachment_timings: dict[str, float] = {}
 
         for attachment in issue.attachments:
             if not isinstance(attachment, dict):
                 continue
 
             name = str(attachment.get("name") or attachment.get("filename") or attachment.get("title") or "Anhang")
+            suffix = self._attachment_suffix(name=name, local_path=attachment.get("local_path"))
             local_path_raw = attachment.get("local_path")
             if isinstance(local_path_raw, str) and local_path_raw.strip():
                 path = Path(local_path_raw.strip()).expanduser()
@@ -143,7 +167,20 @@ class JiraTransformer:
                 )
                 continue
 
-            result = transformer.transform(path)
+            started = perf_counter()
+            context = ParentDocumentContext(
+                source_system="jira",
+                parent_id=issue.issue_key,
+                parent_title=issue.summary,
+                parent_source_ref=issue.source_ref,
+                parent_source_url=issue.source_url,
+                parent_output_name=f"{issue.issue_key}__{self._slugify(issue.summary)}.md",
+                section_hint="attachments",
+                surrounding_text=issue.description,
+            )
+            result = transformer.transform(path, context=context)
+            elapsed_ms = round((perf_counter() - started) * 1000, 2)
+            attachment_timings[f"{name}|{suffix}"] = elapsed_ms
             if not result.success:
                 warnings.append(
                     TransformWarning(
@@ -174,9 +211,77 @@ class JiraTransformer:
                     )
                 )
 
+            if elapsed_ms >= 1000:
+                logger.info(
+                    "JIRA attachment transformed. issue=%s attachment=%s suffix=%s duration_ms=%.2f",
+                    issue.issue_key,
+                    name,
+                    suffix,
+                    elapsed_ms,
+                )
+
+            image_ref = result.metadata.get("image_analysis_ref")
+            if isinstance(image_ref, dict):
+                image_analysis_refs.append(image_ref)
+            artifacts = result.metadata.get("derived_artifacts")
+            if isinstance(artifacts, list):
+                for artifact in artifacts:
+                    if not isinstance(artifact, dict):
+                        continue
+                    file_name = artifact.get("file_name")
+                    media_type = artifact.get("media_type")
+                    content = artifact.get("content")
+                    if isinstance(file_name, str) and isinstance(media_type, str) and isinstance(content, str):
+                        derived_artifacts.append(
+                            DerivedFileArtifact(file_name=file_name, media_type=media_type, content=content)
+                        )
+
             sections.extend([f"### {name}", "", markdown, ""])
 
-        return sections
+        if attachment_timings:
+            issue.raw_metadata["_attachment_timings_ms"] = attachment_timings
+        return sections, image_analysis_refs, derived_artifacts
+
+    def _build_attachment_stats(self, issue: JiraRawIssue, warnings: list[TransformWarning]) -> dict[str, object]:
+        suffix_counts: dict[str, int] = {}
+        duration_by_suffix_ms: dict[str, float] = {}
+        extracted = 0
+        raw_timings = issue.raw_metadata.get("_attachment_timings_ms", {})
+        if isinstance(raw_timings, dict):
+            for key, elapsed_ms in raw_timings.items():
+                _name, _sep, suffix = str(key).rpartition("|")
+                suffix = suffix or "<noext>"
+                suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1
+                duration_by_suffix_ms[suffix] = duration_by_suffix_ms.get(suffix, 0.0) + float(elapsed_ms)
+                extracted += 1
+
+        warning_counts: dict[str, int] = {}
+        warning_suffixes: dict[str, int] = {}
+        for warning in warnings:
+            if not warning.code.startswith("attachment_"):
+                continue
+            warning_counts[warning.code] = warning_counts.get(warning.code, 0) + 1
+            suffix = self._attachment_suffix(name=warning.context or "")
+            warning_suffixes[suffix] = warning_suffixes.get(suffix, 0) + 1
+
+        failed = sum(warning_counts.values())
+        return {
+            "total": len(issue.attachments),
+            "extracted": extracted,
+            "failed": failed,
+            "suffix_counts": suffix_counts,
+            "duration_by_suffix_ms": {key: round(value, 2) for key, value in duration_by_suffix_ms.items()},
+            "warning_counts": warning_counts,
+            "warning_suffixes": warning_suffixes,
+        }
+
+    @staticmethod
+    def _attachment_suffix(*, name: str, local_path: object | None = None) -> str:
+        if isinstance(local_path, str) and local_path.strip():
+            suffix = Path(local_path.strip()).suffix.lower()
+            return suffix or "<noext>"
+        suffix = Path(name).suffix.lower()
+        return suffix or "<noext>"
 
     def _convert_structure(self, text: str) -> str:
         conversions = [
@@ -209,3 +314,10 @@ class JiraTransformer:
         cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
         return cleaned.strip()
+
+    @staticmethod
+    def _slugify(value: str) -> str:
+        lower = value.strip().lower()
+        normalized = re.sub(r"[^a-z0-9äöüß\-\s]", "", lower)
+        compact = re.sub(r"\s+", "-", normalized)
+        return compact.strip("-") or "untitled"

@@ -39,7 +39,7 @@ class MarkItDownTransformer:
     def can_handle(self, path: Path) -> bool:
         return path.suffix.lower() in _SUPPORTED_EXTENSIONS
 
-    def transform(self, path: Path) -> TransformResult:
+    def transform(self, path: Path, context: object | None = None) -> TransformResult:
         if not self.can_handle(path):
             return TransformResult(
                 source_path=path,

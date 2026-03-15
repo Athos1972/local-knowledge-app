@@ -6,6 +6,7 @@ from retrieval.answer_pipeline import AnswerPipeline
 from retrieval.context_builder import ContextBuilder
 from retrieval.keyword_search import SearchResult
 from retrieval.prompt_builder import PromptBuilder
+from retrieval.reranker import BaseReranker
 from retrieval.source_formatter import SourceFormatter
 
 
@@ -15,6 +16,21 @@ class _StubSearcher:
 
     def search(self, query: str, top_k: int = 5) -> list[SearchResult]:
         return self._results[:top_k]
+
+    def search_candidates(self, query: str, candidate_k: int = 100, source_filters: list[str] | None = None) -> list[SearchResult]:
+        return self._results[:candidate_k]
+
+
+class _StubReranker(BaseReranker):
+    model_name = "stub-reranker"
+
+    def rerank(self, query: str, candidates: list[SearchResult], top_n: int) -> list[SearchResult]:
+        reranked: list[SearchResult] = []
+        for index, candidate in enumerate(reversed(candidates[:top_n]), start=1):
+            candidate.metadata["rerank_score"] = float(top_n - index + 1)
+            candidate.rerank_score = float(top_n - index + 1)
+            reranked.append(candidate)
+        return reranked
 
 
 class AnswerPreparationTests(unittest.TestCase):
@@ -61,14 +77,20 @@ class AnswerPreparationTests(unittest.TestCase):
             context_builder=ContextBuilder(max_context_chars=500),
             prompt_builder=PromptBuilder(),
             source_formatter=SourceFormatter(),
+            reranker=_StubReranker(),
+            candidate_k=20,
+            final_k=1,
         )
 
-        payload = pipeline.prepare_answer("event mesh kyma", top_k=0)
+        payload = pipeline.prepare_answer("event mesh kyma", top_k=1, candidate_k=10)
         self.assertEqual("event mesh kyma", payload["query"])
         self.assertEqual(1, len(payload["results"]))
+        self.assertEqual(1, len(payload["candidate_results"]))
         self.assertEqual(1, len(payload["sources"]))
         self.assertIn("SOURCE 1", payload["context"])
         self.assertIn("QUESTION", payload["prompt"])
+        self.assertEqual(10, payload["debug"]["candidate_k"])
+        self.assertTrue(payload["debug"]["reranker_enabled"])
 
 
 if __name__ == "__main__":
