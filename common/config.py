@@ -58,8 +58,12 @@ class AppConfig:
         if cls._config is not None:
             return cls._config
 
-        config_file = os.getenv("APP_CONFIG_FILE", "config/app.toml")
-        path = Path(config_file).expanduser()
+        config_file = os.getenv("APP_CONFIG_FILE")
+        if config_file:
+            path = Path(config_file).expanduser()
+        else:
+            candidates = [Path("config/local.toml"), Path("config/app.toml")]
+            path = next((candidate for candidate in candidates if candidate.exists()), candidates[-1])
 
         if not path.exists():
             cls._config = {}

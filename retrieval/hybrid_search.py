@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import re
+
 from common.logging_setup import AppLogger
 from retrieval.keyword_search import KeywordSearcher, SearchResult
 from retrieval.vector_search import VectorSearcher
 
 logger = AppLogger.get_logger()
+_TOKEN_RE = re.compile(r"\w+", flags=re.UNICODE)
 
 
 class HybridSearcher:
@@ -56,7 +59,12 @@ class HybridSearcher:
 
         for item in keyword_results:
             merged[item.chunk_id] = item
-            total_scores[item.chunk_id] = self.keyword_weight * keyword_scores.get(item.chunk_id, 0.0)
+            lexical_boost = self._lexical_match_boost(query, item)
+            total_scores[item.chunk_id] = (
+                self.keyword_weight * keyword_scores.get(item.chunk_id, 0.0)
+                + self.keyword_weight * 0.35
+                + lexical_boost
+            )
 
         for item in vector_results:
             if item.chunk_id not in merged:
@@ -159,6 +167,33 @@ class HybridSearcher:
                 f"{item.chunk_id}:{item.score:.4f}"
             )
         return "[" + ", ".join(preview) + "]"
+
+    @staticmethod
+    def _lexical_match_boost(query: str, item: SearchResult) -> float:
+        query_tokens = {
+            token.lower()
+            for token in _TOKEN_RE.findall(query.lower())
+            if token.strip()
+        }
+        if not query_tokens:
+            return 0.0
+
+        parts = [
+            item.title,
+            item.section_header or "",
+            item.text,
+        ]
+        haystack = " ".join(part for part in parts if part).lower()
+        if not haystack:
+            return 0.0
+
+        matched = sum(1 for token in query_tokens if token in haystack)
+        coverage = matched / len(query_tokens)
+        exact_phrase = query.strip().lower() in haystack
+        boost = coverage * 0.25
+        if exact_phrase:
+            boost += 0.15
+        return round(boost, 4)
 
     @staticmethod
     def _normalize_scores(results: list[SearchResult]) -> dict[str, float]:

@@ -13,7 +13,7 @@ def test_loads_dotenv_value_without_overriding_existing_env(monkeypatch, tmp_pat
                 "# comment",
                 "API_KEY=from_dotenv",
                 "export WORKSPACE_NAME=workspace_from_dotenv",
-                "QUOTED_VALUE=\"quoted\"",
+                'QUOTED_VALUE="quoted"',
             ]
         ),
         encoding="utf-8",
@@ -69,3 +69,34 @@ def test_app_config_file_supports_tilde(monkeypatch, tmp_path: Path) -> None:
     AppConfig._config = None
 
     assert AppConfig.get("x", "value", default="") == "ok"
+
+
+def test_prefers_local_toml_when_no_explicit_config_file(monkeypatch, tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "app.toml").write_text('[x]\nvalue = "from_app"\n', encoding="utf-8")
+    (config_dir / "local.toml").write_text('[x]\nvalue = "from_local"\n', encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("APP_CONFIG_FILE", raising=False)
+
+    AppConfig._env_loaded = False
+    AppConfig._config = None
+
+    assert AppConfig.get("x", "value", default="") == "from_local"
+
+
+def test_explicit_app_config_file_overrides_local_default(monkeypatch, tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    app_path = config_dir / "app.toml"
+    app_path.write_text('[x]\nvalue = "from_app"\n', encoding="utf-8")
+    (config_dir / "local.toml").write_text('[x]\nvalue = "from_local"\n', encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("APP_CONFIG_FILE", str(app_path))
+
+    AppConfig._env_loaded = False
+    AppConfig._config = None
+
+    assert AppConfig.get("x", "value", default="") == "from_app"

@@ -1,90 +1,132 @@
+# Demo-/Dokukonfiguration fuer die App.
+# Diese Datei soll keine echten lokalen Werte enthalten.
+# Wenn vorhanden, wird lokal immer zuerst `config/local.toml` verwendet.
+# Nur wenn keine `local.toml` existiert, faellt die App auf diese Datei zurueck.
 
 [logging]
-log_dir = "logs"
-level = "DEBUG"
+# Zielordner fuer Logdateien.
+# Typisch: relativer Projektordner wie `logs` oder ein absoluter Pfad.
+log_dir = "./path/to/logs"
+# Globales Log-Level fuer die Anwendung.
+# Uebliche Werte: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`.
+level = "INFO"
+# Log-Level fuer die Konsolenausgabe.
 level_stdout = "INFO"
+# Log-Level fuer Dateilogging.
 level_file = "DEBUG"
+# `true` aktiviert Logs auf stdout/stderr, `false` schaltet Konsolenlogging ab.
 log_to_console = true
+# `true` schreibt Logdateien, `false` deaktiviert Dateilogging.
 log_to_file = true
+# `true` erzeugt pro Lauf eine eigene Datei, `false` schreibt in gemeinsame Dateien.
 separate_file_per_run = true
 
 [confluence_transform]
-input_root = "~/local-knowledge-data/exports/confluence"
-output_root = "~/local-knowledge-data/staging/confluence"
-manifests_dir = "~/local-knowledge-data/system/confluence_transform"
+# Wurzelverzeichnis fuer rohe Confluence-Exporte.
+input_root = "~/path/to/local-knowledge-data/exports/confluence"
+# Zielverzeichnis fuer transformierte Confluence-Markdown-Dateien.
+output_root = "~/path/to/local-knowledge-data/staging/confluence"
+# Ordner fuer State, Reports und Manifeste des Transform-Laufs.
+manifests_dir = "~/path/to/local-knowledge-data/system/confluence_transform"
+# Mindestanzahl an Zeichen in der Rohseite; kuerzere Seiten koennen verworfen werden.
 minimum_number_of_raw_characters_in_page = 120
+# Mindestanzahl an Zeichen in der finalen transformierten Seite.
 minimum_count_characters_confluence_final_page = 200
+# Liste der Page-Properties, die ins Frontmatter uebernommen werden.
+# Moeglich sind beliebige Confluence-Property-Namen als Strings.
 page_properties_frontmatter_keys = [
-  "Auftraggeber",
-  "Auftragnehmer",
-  "Aufwand",
-  "Auslöser",
-  "betroffene Einheiten",
-  "jira",
-  "Komponente",
-  "Komplexität",
-  "Modul/OFT",
-  "Priorität",
-  "Prio",
-  "Sponsoring",
+  "Example Property",
   "Status",
-  "Streamlead",
-  "Type",
 ]
 
 [scraping_transform]
-# Default-Input für scripts/run_transform_scraping_exports.py,
-# wenn --input-root nicht explizit gesetzt ist.
+# Default-Input fuer den Scraping-Transform.
 input_root = "exports/scraping"
-
-# Default-Output für scripts/run_transform_scraping_exports.py,
-# wenn --output-root nicht explizit gesetzt ist.
+# Default-Output fuer den Scraping-Transform.
 output_root = "staging/transformed"
 
 [publish.confluence]
-input_root = "~/local-knowledge-data/staging/confluence"
-output_root = "~/local-knowledge-data/domains"
-manifests_dir = "~/local-knowledge-data/system/confluence_publish"
+# Quelle fuer zu publishende Confluence-Markdown-Dateien.
+input_root = "~/path/to/local-knowledge-data/staging/confluence"
+# Zielwurzel unter der publizierte Inhalte abgelegt werden.
+output_root = "~/path/to/local-knowledge-data/domains"
+# Ordner fuer Publish-Manifeste und Publish-State.
+manifests_dir = "~/path/to/local-knowledge-data/system/confluence_publish"
+# Publish-Modus.
+# Aktuell sinnvoll: `copy`; je nach Implementierung spaeter ggf. weitere Modi.
 mode = "copy"
 
 [publish.confluence.space_map]
-"~NBUBEV" = "sap/customers/xyz/projects/zzz/confluence"
+# Mapping von Confluence-Space-Key auf Zielpfad relativ zu `output_root`.
+# Beliebig viele Eintraege moeglich.
+"SPACEKEY" = "example/project/confluence"
 
 [publish.confluence.defaults]
+# Fallback-Pfad fuer ungemappte Spaces relativ zu `output_root`.
 fallback_path = "_unmapped/confluence"
+# `true` publiziert ungemappte Spaces in den Fallback-Pfad, `false` laesst sie aus.
 publish_unmapped = true
 
 [ollama]
+# Basis-URL des Ollama-Servers.
 base_url = "http://localhost:11434"
+# Chat-Modell fuer Antwortgenerierung.
 chat_model = "llama3.1:8b"
+# Embedding-Modell fuer Vektorindizierung.
 embed_model = "nomic-embed-text"
 
 [embeddings]
+# Embedding-Provider.
+# Aktuell genutzt: `ollama` oder `sentence_transformers`.
 provider = "ollama"
 
+[retrieval]
+# Anzahl Kandidaten aus der ersten Suche vor dem finalen Ranking.
+candidate_k = 100
+# Anzahl final zurueckgegebener Treffer.
+final_k = 7
+# Gewichtung der Keyword-Suche im Hybrid-Scoring; typischer Bereich 0.0 bis 1.0.
+keyword_weight = 0.5
+# Gewichtung der Vektorsuche im Hybrid-Scoring; typischer Bereich 0.0 bis 1.0.
+vector_weight = 0.5
+# Maximale Groesse des Antwortkontexts in Zeichen.
+max_context_chars = 8000
+
+[reranker]
+# `true` aktiviert einen nachgelagerten Reranker, `false` deaktiviert ihn.
+enabled = true
+# Modellname fuer den Reranker.
+model = "BAAI/bge-reranker-v2-m3"
+# Zielgeraet fuer das Modell, z. B. `mps`, `cpu` oder `cuda`.
+device = "cpu"
+
 [terminology]
+# Ordner fuer Terminologie-Reports.
 reports_dir = "reports"
 
 [terminology.files]
-settings = "settings_local.yml"
-sources = "sources_local.yml"
-terms = "terms_local.yml"
+# Dateiname fuer Terminologie-Settings relativ zum Terminology-Konfigordner.
+settings = "settings.yml"
+# Dateiname fuer Terminologie-Quellen relativ zum Terminology-Konfigordner.
+sources = "sources.yml"
+# Dateiname fuer Terminologie-Begriffe relativ zum Terminology-Konfigordner.
+terms = "terms.yml"
 
 [documents_transform]
-input_root = "~/local-knowledge-data/exports/documents"
-output_root = "~/local-knowledge-data/staging/documents"
-publish_root = "~/local-knowledge-data/ingest/domains"
-manifests_dir = "~/local-knowledge-data/system/documents_transform"
+# Wurzelverzeichnis fuer Dokumentimporte.
+input_root = "~/path/to/local-knowledge-data/exports/documents"
+# Zielverzeichnis fuer transformierte Dokumente.
+output_root = "~/path/to/local-knowledge-data/staging/documents"
+# Zielwurzel fuer publizierte Dokumente.
+publish_root = "~/path/to/local-knowledge-data/ingest/domains"
+# Ordner fuer State und Manifeste des Dokument-Transforms.
+manifests_dir = "~/path/to/local-knowledge-data/system/documents_transform"
+# Domain-Fallback wenn keine Mapping-Regel greift.
 fallback_domain = "misc_documents"
 
+# Mapping-Regeln werden top-down ausgewertet.
+# `match` ist ein Glob-artiges Muster auf dem logischen Quellpfad.
+# `domain` ist der Zielpfad bzw. die Zieldomain.
 [[documents_transform.mapping]]
-match = "sharepoint/*/projektmanagement/**"
-domain = "project_management"
-
-[[documents_transform.mapping]]
-match = "sharepoint/*/architektur/**"
-domain = "architecture"
-
-[[documents_transform.mapping]]
-match = "book/arisca/**"
-domain = "arisca"
+match = "source/system/**"
+domain = "example/domain"

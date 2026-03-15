@@ -43,7 +43,7 @@ Die Runtime ist jetzt standardmäßig vollständig lokal über **Ollama**:
 
 ## Konfiguration
 
-Konfiguration wird aus `config/app.toml` gelesen, ENV-Variablen überschreiben TOML-Werte.
+Konfiguration wird lokal bevorzugt aus `config/local.toml` gelesen. Wenn diese Datei fehlt, wird `config/app.toml` als Demo-/Fallback-Konfiguration verwendet. ENV-Variablen überschreiben TOML-Werte.
 
 ### Relevante ENV-Variablen
 
@@ -54,7 +54,7 @@ Konfiguration wird aus `config/app.toml` gelesen, ENV-Variablen überschreiben T
 - `RERANKER_MODEL` (Default: `BAAI/bge-reranker-v2-m3`)
 - `RERANKER_DEVICE` (optional, z. B. `mps`, `cpu`, `cuda`)
 
-### app.toml Defaults
+### app.toml Demo-Defaults
 
 ```toml
 [ollama]

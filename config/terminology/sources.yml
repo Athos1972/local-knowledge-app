@@ -1,16 +1,29 @@
+# Demo-/Dokudatei fuer source-spezifische Terminology-Modi.
+# Definiert je Source-Type, ob Begriffe annotiert, nur im Block gelistet
+# oder komplett ignoriert werden.
+
 sources:
   confluence:
+    # `annotate_and_block`: In-Text-Annotation plus Terminology-Block.
+    # Weitere sinnvolle Modi: `block_only`, `annotate_only`, `off`.
     mode: annotate_and_block
+    # Aktiviert die Kandidatenerkennung fuer diese Quelle.
     candidates_enabled: true
+
   jira:
     mode: annotate_and_block
     candidates_enabled: true
+
   mail:
+    # `block_only`: keine In-Text-Annotation, nur zusammenfassender Block.
     mode: block_only
     candidates_enabled: true
+
   teams:
     mode: block_only
     candidates_enabled: true
+
   scrape:
+    # `off`: keine Terminology-Anreicherung fuer diese Quelle.
     mode: off
     candidates_enabled: false

@@ -1,8 +1,26 @@
+# Demo-/Dokudatei fuer den zentralen Terminologie-Bestand.
+# Echte lokale Begriffe koennen in `terms_local.yml` gepflegt und per
+# `config/local.toml` aktiviert werden.
+#
+# Wichtige Felder pro Term:
+# - `id`: stabile interne Kennung fuer Relationen.
+# - `canonical`: Schreibweise fuer Matching und Normalisierung.
+# - `label`: lesbarer Titel im Terminology-Block.
+# - `description`: kurze fachliche Erklaerung.
+# - `term_class`: freie Klassifikation, z. B. `system`, `process`, `person`.
+# - `aliases`: alternative Schreibweisen oder Abkuerzungen.
+# - `relations`: Beziehungen zu anderen Terms, z. B. `related_to`.
+# - `applies_to`: Liste der Source-Types, in denen der Term gilt.
+# - `annotate_policy`: z. B. `first_occurrence` oder `never`.
+# - `block_policy`: z. B. `include` oder `exclude`.
+# - `case_sensitive`: ueberschreibt das globale Matching-Verhalten fuer diesen Term.
+# - `priority`: steuert die Reihenfolge bzw. Konfliktaufloesung bei Treffern.
+
 terms:
-  - id: prews
-    canonical: PREWS
-    label: Projekt-Requirements-Workshop
-    description: Strukturierter Workshop zur Erhebung und Abstimmung von Projektanforderungen.
+  - id: Franzi
+    canonical: Franzi
+    label: Franzi's Label
+    description: Das ist der Franzi
     term_class: process
     aliases: []
     relations: []
@@ -15,24 +33,6 @@ terms:
     block_policy: include
     case_sensitive: false
     priority: 20
-
-  - id: psp_ap
-    canonical: PSP-AP
-    label: PSP-Element im Projektkontext
-    description: Arbeitspaket-Knoten im Projektstrukturplan.
-    term_class: process
-    aliases:
-      - PSP AP
-    relations: []
-    applies_to:
-      - confluence
-      - jira
-      - mail
-      - teams
-    annotate_policy: first_occurrence
-    block_policy: include
-    case_sensitive: false
-    priority: 30
 
   - id: isu
     canonical: ISU
@@ -52,51 +52,13 @@ terms:
     case_sensitive: false
     priority: 10
 
-  - id: eda
-    canonical: EDA
-    label: Energy Data Exchange Austria
-    description: Plattform im energiewirtschaftlichen Datenaustausch.
-    term_class: organisation
-    aliases: []
-    relations:
-      - type: related_to
-        target_term_id: ponton
-    applies_to:
-      - confluence
-      - jira
-      - mail
-      - teams
-    annotate_policy: first_occurrence
-    block_policy: include
-    case_sensitive: false
-    priority: 15
-
-  - id: ponton
-    canonical: PONTON
-    label: PONTON GmbH
-    description: Anbieter von Marktplattform- und Energiemarktlösungen.
-    term_class: organisation
-    aliases: []
-    relations:
-      - type: related_to
-        target_term_id: eda
-    applies_to:
-      - confluence
-      - jira
-      - mail
-      - teams
-    annotate_policy: first_occurrence
-    block_policy: include
-    case_sensitive: false
-    priority: 16
-
   - id: maxmueller
     canonical: MM
-    label: Max Müller
-    description: Beispiel-Personenkürzel, in V1 ohne In-Text-Annotation.
+    label: Max Mueller
+    description: Beispiel-Personenkuerzel, in V1 ohne In-Text-Annotation.
     term_class: person
     aliases:
-      - M. Müller
+      - M. Mueller
     relations:
       - type: abbreviation_of
         target_term_id: maxmueller_name
@@ -109,9 +71,9 @@ terms:
     priority: 90
 
   - id: maxmueller_name
-    canonical: Max Müller
-    label: Max Müller
-    description: Vollständiger Personenname für relationale Zuordnung.
+    canonical: Max Mueller
+    label: Max Mueller
+    description: Vollstaendiger Personenname fuer relationale Zuordnung.
     term_class: person
     aliases: []
     relations: []

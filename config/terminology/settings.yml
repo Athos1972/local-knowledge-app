@@ -1,9 +1,23 @@
+# Demo-/Dokudatei fuer globale Terminology-Engine-Settings.
+# Fuer echte lokale Anpassungen koennen parallel `settings_local.yml` und
+# die Referenz in `config/local.toml` verwendet werden.
+
 settings:
+  # Aktiviert oder deaktiviert die Terminology-Anreicherung global.
   enabled: true
+  # Wenn `true`, werden Begriffe standardmaessig case-insensitive gematcht,
+  # sofern nicht ein einzelner Term explizit `case_sensitive: true` setzt.
   case_insensitive_default: true
+  # Wenn `true`, werden Unterschiede bei Bindestrichen und Leerzeichen beim
+  # Matching normalisiert, z. B. `IS-U` vs `IS U`.
   normalize_hyphen_whitespace: true
+  # Mindestanzahl gefundener Begriffe, bevor ein Terminology-Block angehaengt wird.
   block_min_terms: 2
+  # Wenn `true`, erscheinen Aliase im erzeugten Terminology-Block mit.
   show_aliases_in_block: false
+  # Aktiviert die Erkennung unbekannter Kandidaten fuer den Kandidatenreport.
   candidate_detection_enabled: true
+  # Regex-Liste fuer potentielle unbekannte Begriffe. Jeder Pattern-Eintrag wird
+  # zusaetzlich zu den bekannten Terms auf den Text angewendet.
   candidate_patterns:
     - '\b[A-ZÄÖÜ][A-ZÄÖÜ0-9\-]{2,}\b'

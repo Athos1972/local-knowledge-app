@@ -211,3 +211,4 @@ __marimo__/
 .venv/
 logs/
 *.tmp
+config/local.toml

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -129,12 +130,19 @@ class AnswerPipeline:
             self._summarize_results(candidate_results),
         )
         reranker_error: str | None = None
+        reranker_guardrail_applied = False
         if self.reranker is not None:
             try:
-                results = self.reranker.rerank(
+                reranked_results = self.reranker.rerank(
                     normalized_query,
                     candidate_results,
                     top_n=normalized_final_k,
+                )
+                results, reranker_guardrail_applied = self._apply_rerank_guardrail(
+                    query=normalized_query,
+                    candidate_results=candidate_results,
+                    reranked_results=reranked_results,
+                    final_k=normalized_final_k,
                 )
             except RerankerError as error:
                 reranker_error = str(error)
@@ -147,10 +155,19 @@ class AnswerPipeline:
                 results = candidate_results[:normalized_final_k]
         else:
             results = candidate_results[:normalized_final_k]
+        deduped_results = self._dedupe_results(results)
+        if len(deduped_results) < normalized_final_k:
+            deduped_results = self._backfill_deduped_results(
+                existing=deduped_results,
+                pool=candidate_results,
+                final_k=normalized_final_k,
+            )
+        results = deduped_results
         logger.info(
-            "AnswerPipeline finalized results. query=%s final_results=%s top=%s",
+            "AnswerPipeline finalized results. query=%s final_results=%s guardrail=%s top=%s",
             normalized_query,
             len(results),
+            reranker_guardrail_applied,
             self._summarize_results(results),
         )
         context = self.context_builder.build_context(results)
@@ -186,6 +203,7 @@ class AnswerPipeline:
                 "reranker_enabled": self.reranker is not None,
                 "reranker_model": getattr(self.reranker, "model_name", None),
                 "reranker_error": reranker_error,
+                "reranker_guardrail_applied": reranker_guardrail_applied,
                 "candidate_preview": self._result_preview(candidate_results),
                 "final_preview": self._result_preview(results),
             },
@@ -219,3 +237,129 @@ class AnswerPipeline:
                 }
             )
         return preview
+
+    def _apply_rerank_guardrail(
+        self,
+        query: str,
+        candidate_results: list[SearchResult],
+        reranked_results: list[SearchResult],
+        final_k: int,
+    ) -> tuple[list[SearchResult], bool]:
+        if not reranked_results:
+            return candidate_results[:final_k], True
+
+        if not self._should_apply_rerank_guardrail(reranked_results):
+            return reranked_results[:final_k], False
+
+        hybrid_lookup = {item.chunk_id: index for index, item in enumerate(candidate_results)}
+        merged_candidates: dict[str, SearchResult] = {}
+        for item in reranked_results:
+            merged_candidates[item.chunk_id] = item
+        for item in candidate_results[: max(final_k * 3, final_k)]:
+            merged_candidates.setdefault(item.chunk_id, item)
+
+        def combined_score(item: SearchResult) -> tuple[float, float, int, str, str]:
+            rerank_score = item.rerank_score if item.rerank_score is not None else 0.0
+            hybrid_rank = hybrid_lookup.get(item.chunk_id, len(candidate_results))
+            hybrid_bonus = max(0.0, 1.0 - (hybrid_rank / max(1, len(candidate_results))))
+            exact_bonus = self._query_exact_match_bonus(query, item)
+            total = (rerank_score * 0.45) + (item.score * 0.45) + (hybrid_bonus * 0.10) + exact_bonus
+            return (
+                round(total, 6),
+                rerank_score,
+                -hybrid_rank,
+                item.doc_id,
+                item.chunk_id,
+            )
+
+        blended = sorted(
+            merged_candidates.values(),
+            key=combined_score,
+            reverse=True,
+        )
+        logger.info(
+            "AnswerPipeline applied rerank guardrail. query=%s reranked=%s blended_top=%s",
+            query,
+            len(reranked_results),
+            self._summarize_results(blended[:final_k]),
+        )
+        return blended[:final_k], True
+
+    @staticmethod
+    def _should_apply_rerank_guardrail(reranked_results: list[SearchResult]) -> bool:
+        if len(reranked_results) < 2:
+            return False
+
+        rerank_scores = [item.rerank_score for item in reranked_results if item.rerank_score is not None]
+        if len(rerank_scores) < 2:
+            return True
+
+        top_score = rerank_scores[0]
+        bottom_score = rerank_scores[-1]
+        spread = top_score - bottom_score
+        if top_score < 0.05:
+            return True
+        if spread < 0.03:
+            return True
+        return False
+
+    def _dedupe_results(self, results: list[SearchResult]) -> list[SearchResult]:
+        deduped: list[SearchResult] = []
+        seen_keys: set[str] = set()
+
+        for item in results:
+            dedupe_key = self._build_dedupe_key(item)
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+            deduped.append(item)
+
+        if len(deduped) != len(results):
+            logger.info(
+                "AnswerPipeline deduped final results. before=%s after=%s",
+                len(results),
+                len(deduped),
+            )
+        return deduped
+
+    def _backfill_deduped_results(
+        self,
+        existing: list[SearchResult],
+        pool: list[SearchResult],
+        final_k: int,
+    ) -> list[SearchResult]:
+        results = list(existing)
+        seen_keys = {self._build_dedupe_key(item) for item in results}
+
+        for item in pool:
+            if len(results) >= final_k:
+                break
+            dedupe_key = self._build_dedupe_key(item)
+            if dedupe_key in seen_keys:
+                continue
+            seen_keys.add(dedupe_key)
+            results.append(item)
+
+        return results[:final_k]
+
+    @staticmethod
+    def _build_dedupe_key(item: SearchResult) -> str:
+        source_ref = (item.source_ref or "").strip().lower()
+        title = (item.title or "").strip().lower()
+        section = (item.section_header or "").strip().lower()
+        text_prefix = item.text.strip()[:600].lower()
+        raw = "||".join([source_ref, title, section, text_prefix])
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _query_exact_match_bonus(query: str, item: SearchResult) -> float:
+        normalized_query = query.strip().lower()
+        if not normalized_query:
+            return 0.0
+
+        haystack = " ".join(
+            value for value in [item.title, item.section_header or "", item.text[:500]] if value
+        ).lower()
+        if normalized_query in haystack:
+            return 0.08
+        return 0.0

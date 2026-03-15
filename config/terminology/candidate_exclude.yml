@@ -1,5 +1,18 @@
+# Demo-/Dokudatei fuer Candidate-Excludes.
+# Diese Patterns filtern Begriffe aus dem Kandidatenreport heraus, obwohl sie
+# formal auf ein Candidate-Pattern matchen.
+#
+# Hinweise:
+# - `*` funktioniert als Wildcard.
+# - Matching ist case-insensitive.
+# - Sinnvoll fuer technische Platzhalter, generische Akronyme oder Rauschen.
+
 candidate_exclude:
+  # Typisches Log-/Statuswort, das nicht als Fachbegriff vorgeschlagen werden soll.
   - INFO
+  # Sehr generisches Akronym, sonst oft False Positive.
   - API
+  # Sehr generisches Akronym, sonst oft False Positive.
   - URL
+  # Wildcard fuer ganze Prefix-Familien, hier z. B. interne Bereichskuenzel.
   - BSBX*

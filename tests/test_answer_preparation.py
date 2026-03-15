@@ -33,6 +33,17 @@ class _StubReranker(BaseReranker):
         return reranked
 
 
+class _FlatScoreReranker(BaseReranker):
+    model_name = "flat-reranker"
+
+    def rerank(self, query: str, candidates: list[SearchResult], top_n: int) -> list[SearchResult]:
+        reranked = list(reversed(candidates[:top_n]))
+        for item in reranked:
+            item.metadata["rerank_score"] = 0.0025
+            item.rerank_score = 0.0025
+        return reranked
+
+
 class AnswerPreparationTests(unittest.TestCase):
     def test_prompt_builder_handles_missing_context(self) -> None:
         prompt = PromptBuilder().build_prompt(query="Was ist Kyma?", results=[], context="")
@@ -91,6 +102,93 @@ class AnswerPreparationTests(unittest.TestCase):
         self.assertIn("QUESTION", payload["prompt"])
         self.assertEqual(10, payload["debug"]["candidate_k"])
         self.assertTrue(payload["debug"]["reranker_enabled"])
+
+    def test_answer_pipeline_dedupes_final_results(self) -> None:
+        duplicated_source = "domains/idex.md"
+        results = [
+            SearchResult(
+                doc_id="doc-1",
+                chunk_id="chunk-1",
+                title="IDEX Grundlagen",
+                score=1.0,
+                text="IDEX content repeated",
+                metadata={"section_header": "Overview"},
+                source_ref=duplicated_source,
+                section_header="Overview",
+            ),
+            SearchResult(
+                doc_id="doc-2",
+                chunk_id="chunk-2",
+                title="IDEX Grundlagen",
+                score=0.99,
+                text="IDEX content repeated",
+                metadata={"section_header": "Overview"},
+                source_ref=duplicated_source,
+                section_header="Overview",
+            ),
+            SearchResult(
+                doc_id="doc-3",
+                chunk_id="chunk-3",
+                title="IDEX Historie",
+                score=0.8,
+                text="Another IDEX text",
+                metadata={"section_header": "History"},
+                source_ref="domains/idex-history.md",
+                section_header="History",
+            ),
+        ]
+        pipeline = AnswerPipeline(
+            hybrid_searcher=_StubSearcher(results),
+            context_builder=ContextBuilder(max_context_chars=500),
+            prompt_builder=PromptBuilder(),
+            source_formatter=SourceFormatter(),
+            reranker=None,
+            candidate_k=10,
+            final_k=3,
+        )
+
+        payload = pipeline.prepare_answer("IDEX", top_k=3, candidate_k=10)
+
+        self.assertEqual(2, len(payload["results"]))
+        self.assertEqual(["chunk-1", "chunk-3"], [item.chunk_id for item in payload["results"]])
+
+    def test_answer_pipeline_applies_guardrail_for_flat_rerank_scores(self) -> None:
+        results = [
+            SearchResult(
+                doc_id="doc-1",
+                chunk_id="chunk-1",
+                title="Neue Wechselverordnung",
+                score=0.95,
+                text="Die neue Wechselverordnung aendert Fristen und Prozesse.",
+                metadata={"section_header": "Aenderungen"},
+                source_ref="domains/wechselverordnung.md",
+                section_header="Aenderungen",
+            ),
+            SearchResult(
+                doc_id="doc-2",
+                chunk_id="chunk-2",
+                title="Allgemeine Projektseite",
+                score=0.60,
+                text="Projektinformationen ohne direkten Bezug.",
+                metadata={"section_header": "Overview"},
+                source_ref="domains/project.md",
+                section_header="Overview",
+            ),
+        ]
+        pipeline = AnswerPipeline(
+            hybrid_searcher=_StubSearcher(results),
+            context_builder=ContextBuilder(max_context_chars=500),
+            prompt_builder=PromptBuilder(),
+            source_formatter=SourceFormatter(),
+            reranker=_FlatScoreReranker(),
+            candidate_k=10,
+            final_k=2,
+        )
+
+        payload = pipeline.prepare_answer("Was aendert sich mit der neuen Wechselverordnung?", top_k=2, candidate_k=10)
+
+        self.assertTrue(payload["debug"]["reranker_guardrail_applied"])
+        self.assertEqual("chunk-1", payload["results"][0].chunk_id)
 
 
 if __name__ == "__main__":
